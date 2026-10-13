@@ -418,6 +418,15 @@ def flow_upload(browser, subject, site, bank_global):
     cid = pg.evaluate(f"Object.keys(window.{bank_global}.CONCEPTS)[0]")
     pg.goto(URL + "#c/" + cid); pg.wait_for_selector("#main .remedy", timeout=10000)
     check(f"補題區 #c/{cid} 直接打開該觀念", pg.locator("#cBack").count() == 1)
+    # 審 Codex b44cf85／9404d3a／2904b29：回首頁後同一連結要能再開；改成無效網址要回首頁
+    pg.locator("#cBack").click(); pg.wait_for_selector("#main .btn, #main .done")
+    check(f"補題區 觀念頁回首頁後網址不再帶 #c/", not pg.evaluate("location.hash").startswith("#c/"), pg.evaluate("location.hash"))
+    pg.evaluate(f"location.hash = '#c/{cid}'"); pg.wait_for_timeout(300)
+    check(f"補題區 回首頁後再開同一個 #c/{cid}：打開該觀念", pg.locator("#cBack").count() == 1)
+    if pg.locator("#cBack").count() == 0:   # 不依賴上一步：不在觀念頁就點一張觀念卡進去（不重新載入，避免中斷在途請求）
+        pg.locator("#concepts .ccard").first.click(); pg.wait_for_selector("#cBack", timeout=10000)
+    pg.evaluate("location.hash = '#c/no-such-concept'"); pg.wait_for_timeout(300)
+    check(f"補題區 觀念頁中網址改成不存在的觀念：回首頁", pg.locator("#cBack").count() == 0 and pg.locator("#concepts .ccard").count() > 0)
     pg2 = ctx.new_page(); pg2.on("pageerror", lambda e: errors.append(str(e)))
     pg2.goto(URL + "#c/no-such-concept"); pg2.wait_for_selector("#main .btn, #main .done")
     check(f"補題區 #c/不存在的觀念：留在首頁", pg2.locator("#main .remedy").count() == 0 and pg2.locator("#concepts .ccard").count() > 0)

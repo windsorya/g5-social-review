@@ -338,7 +338,7 @@ function banners(){
 }
 
 /* ---------- 首頁 ---------- */
-var screen="home";
+var screen="home", booted=false;   // booted：開頁那一次 openFromHash 之後才為 true（回首頁才清 #c/ 網址）
 function route(){
   var v=V(), se=v.session;
   if(screen==="practice"&&se&&se.queue.length&&!se.halted) return renderPractice();
@@ -347,6 +347,7 @@ function route(){
 }
 function renderHome(){
   screen="home"; leaveLab();
+  if(booted&&/^#c\//.test(location.hash||"")&&history.replaceState) history.replaceState(null,"",location.pathname+location.search);   // 回首頁清掉觀念連結：同一連結再點才會觸發 hashchange（審 Codex b44cf85／9404d3a）
   var v=V(), se=v.session, left=v.remainingIds.length, el=$("#main"), h;
   var inRound=se&&se.day===v.today&&se.queue.length&&!se.halted&&se.answered.length>0;
   // R1（4agent 2026-10-11）：小考複習進行中不得佔住首頁——「開始今天的練習」一律在，複習續接另給一顆
@@ -905,9 +906,9 @@ document.addEventListener("visibilitychange",function(){
   else { if(screen==="lab") labRefresh(); renderSide(); }
 });
 // 補題做好後的連結 #c/<觀念id>（交辦 #1618；取題腳本 --done 組這個網址）：直接打開那個觀念；沒有這個觀念或還沒開放就留在首頁
-function openFromHash(){
+function openFromHash(e){
   var m=/^#c\/([\w-]+)$/.exec(location.hash||"");
-  if(!m||!Object.prototype.hasOwnProperty.call(CONCEPTS,m[1])||!conceptOn(m[1])) return;
+  if(!m||!Object.prototype.hasOwnProperty.call(CONCEPTS,m[1])||!conceptOn(m[1])){ if(e&&screen==="concept") renderHome(); return; }   // 網址改成無效或清空：離開觀念頁回首頁（審 Codex 2904b29）
   renderConcept(m[1]);
 }
 window.addEventListener("hashchange",openFromHash);
@@ -930,7 +931,7 @@ window.addEventListener("hashchange",openFromHash);
   });
 })();
 renderHome();
-openFromHash();
+openFromHash(); booted=true;
 })();
 </script>
 <script src="https://windsorya.github.io/g5-help/qrcode.js"></script>
