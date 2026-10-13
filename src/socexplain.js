@@ -1,0 +1,208 @@
+// 五上社會（康軒）：每個觀念兩種說法（說法一＋圖、換個說法），以及「一句一句看懂」的先想想看題目。
+// 地圖類的圖（經緯度、海域、山脈、季風）一律北上南下，座標由經緯度換算（不手填像素）；地形剖面圖是「側面看」，圖上會寫明。
+// 圖上的字和解說文字說同一件事；事實依據見 tests/FACTCHECK.md。文字一句一個重點，給小五自己讀。
+(function (root) {
+  "use strict";
+  function wrap(w, h, label, inner) { return '<svg class="fig" viewBox="0 0 ' + w + " " + h + '" role="img" aria-label="' + label + '">' + inner + "</svg>"; }
+  function t(x, y, s, o) { o = o || {}; return '<text x="' + (+x).toFixed(1) + '" y="' + (+y).toFixed(1) + '" font-size="' + (o.fs || 17) + '"' + (o.anchor ? ' text-anchor="' + o.anchor + '"' : "") + (o.bold ? ' font-weight="700"' : "") + ' fill="' + (o.fill || "var(--ink)") + '">' + s + "</text>"; }
+  function board(lines, label, bg) {
+    var h = 34 + lines.length * 40;
+    return wrap(690, h, label || lines.join("；"), '<rect width="690" height="' + h + '" rx="14" fill="' + (bg || "var(--sun-soft)") + '"/>' + lines.map(function (s, i) { return t(28, 44 + i * 40, s); }).join(""));
+  }
+  // 臺灣本島輪廓（約略，東經／北緯）：只當示意，不拿來量距離
+  var TW = [[121.54, 25.30], [121.75, 25.15], [122.00, 25.01], [121.85, 24.60], [121.75, 24.30], [121.62, 23.95], [121.45, 23.40],
+            [121.25, 22.95], [121.00, 22.60], [120.85, 21.90], [120.72, 22.05], [120.45, 22.45], [120.18, 22.85], [120.08, 23.20],
+            [120.15, 23.60], [120.30, 24.05], [120.62, 24.50], [120.92, 24.85], [121.10, 25.05], [121.38, 25.18]];
+  var TROPIC = 23.44;   // 北回歸線約北緯 23.5 度（FACTCHECK C02）
+  // 經度→x（往右是東）、緯度→y（往上是北）。給高度 h，寬度依 cos(23.5°) 算，東西不會被拉胖；回傳 w 讓圖排版
+  function proj(lon0, lon1, lat0, lat1, x0, y0, h) {
+    var k = h / (lat1 - lat0), kx = k * Math.cos(23.5 * Math.PI / 180), w = (lon1 - lon0) * kx;
+    return { w: w, X: function (lon) { return x0 + (lon - lon0) * kx; }, Y: function (lat) { return y0 + (lat1 - lat) * k; } };
+  }
+  function island(P, fill) {
+    return '<polygon points="' + TW.map(function (q) { return P.X(q[0]).toFixed(1) + "," + P.Y(q[1]).toFixed(1); }).join(" ") + '" fill="' + (fill || "var(--grass)") + '" stroke="var(--ink)" stroke-width="2"/>';
+  }
+  function compass(x, y) {   // 北上南下
+    return '<path d="M' + x + " " + (y - 22) + " l8 18 l-8 -5 l-8 5 z" + '" fill="var(--ink)"/>' + t(x, y - 28, "北", { anchor: "middle", fs: 15 }) + t(x, y + 14, "南", { anchor: "middle", fs: 13, fill: "var(--muted)" });
+  }
+  function arrow(x1, y1, x2, y2, color, w) {
+    var a = Math.atan2(y2 - y1, x2 - x1), L = 14, s = (w || 5);
+    var p1 = [x2 - L * Math.cos(a - 0.45), y2 - L * Math.sin(a - 0.45)], p2 = [x2 - L * Math.cos(a + 0.45), y2 - L * Math.sin(a + 0.45)];
+    return '<line x1="' + x1.toFixed(1) + '" y1="' + y1.toFixed(1) + '" x2="' + x2.toFixed(1) + '" y2="' + y2.toFixed(1) + '" stroke="' + color + '" stroke-width="' + s + '" stroke-linecap="round"/>' +
+      '<polygon points="' + x2.toFixed(1) + "," + y2.toFixed(1) + " " + p1[0].toFixed(1) + "," + p1[1].toFixed(1) + " " + p2[0].toFixed(1) + "," + p2[1].toFixed(1) + '" fill="' + color + '"/>';
+  }
+
+  var EXPLAIN = {
+    "1a": [
+      { name: "看圖：用經緯度說出臺灣在哪裡", svg: function () {
+          var P = proj(119.2, 122.6, 21.4, 25.8, 190, 20, 300), s = '<rect width="690" height="362" rx="14" fill="var(--pri-soft)"/>';
+          [120, 121, 122].forEach(function (lon) { s += '<line x1="' + P.X(lon).toFixed(1) + '" y1="20" x2="' + P.X(lon).toFixed(1) + '" y2="320" stroke="var(--line)" stroke-dasharray="4 4"/>' + t(P.X(lon), 338, "東經", { anchor: "middle", fs: 12 }) + t(P.X(lon), 354, lon + " 度", { anchor: "middle", fs: 12 }); });
+          [22, 23, 24, 25].forEach(function (lat) { s += '<line x1="180" y1="' + P.Y(lat).toFixed(1) + '" x2="480" y2="' + P.Y(lat).toFixed(1) + '" stroke="var(--line)" stroke-dasharray="4 4"/>' + t(174, P.Y(lat) + 5, "北緯 " + lat + " 度", { anchor: "end", fs: 13 }); });
+          s += island(P);
+          s += '<line x1="180" y1="' + P.Y(TROPIC).toFixed(1) + '" x2="490" y2="' + P.Y(TROPIC).toFixed(1) + '" stroke="var(--red)" stroke-width="3" stroke-dasharray="10 6"/>';
+          s += t(500, P.Y(TROPIC) - 6, "北回歸線", { fs: 15, fill: "var(--red)" }) + t(500, P.Y(TROPIC) + 14, "約北緯 23.5 度", { fs: 13, fill: "var(--red)" });
+          s += t(P.X(120.45), P.Y(TROPIC) - 10, "嘉義", { anchor: "middle", fs: 15, bold: true }) + t(P.X(121.25), P.Y(TROPIC) - 10, "花蓮", { anchor: "middle", fs: 15, bold: true });
+          s += '<circle cx="' + P.X(119.58).toFixed(1) + '" cy="' + P.Y(23.55).toFixed(1) + '" r="6" fill="var(--grass)" stroke="var(--ink)" stroke-width="1.5"/>' + t(P.X(119.58), P.Y(23.55) - 12, "澎湖", { anchor: "middle", fs: 14 });
+          s += compass(630, 80);
+          return wrap(690, 362, "臺灣地圖（北在上）：臺灣大約在東經 120 到 122 度、北緯 22 到 25 度之間，北回歸線約北緯 23.5 度，通過嘉義、花蓮和澎湖", s);
+        },
+        lines: ["地球儀上的經線、緯線，可以準確說出一個地方在哪裡。", "臺灣大約在東經 120 到 122 度、北緯 22 到 25 度之間。", "北回歸線約在北緯 23.5 度，通過嘉義、花蓮和澎湖。", "用經緯度說的位置，叫做絕對位置。"],
+        task: "在圖上找到北回歸線，說出它通過哪三個縣。", ask: "北回歸線大約在北緯幾度？" },
+      { name: "換個說法：經度看東西，緯度看南北", svg: function () {
+          return board(["緯度：赤道是 0 度，往北叫北緯", "經度：往東叫東經，往西叫西經", "臺灣在赤道北邊 → 北半球", "臺灣是東經 → 東半球"], "經緯度口訣：緯度分南北、經度分東西；臺灣在北半球、東半球");
+        },
+        lines: ["緯度說的是南北，赤道北邊叫北緯。", "經度說的是東西，臺灣在東經。", "所以臺灣在北半球，也在東半球。"],
+        task: "用「北緯」「東經」各說一句臺灣的位置。", ask: "臺灣在北半球還是南半球？為什麼？" }
+    ],
+    "1b": [
+      { name: "看圖：臺灣的四周有什麼", svg: function () {
+          var P = proj(118.8, 123.2, 20.6, 26.4, 255, 40, 260), s = '<rect width="690" height="360" rx="14" fill="var(--waterfill)"/>';
+          s += island(P);
+          s += t(345, 28, "北：東海", { anchor: "middle", fs: 17, bold: true }) + t(610, 30, "東北：琉球群島", { anchor: "end", fs: 15 });
+          s += t(560, 190, "東：太平洋", { fs: 17, bold: true });
+          s += t(345, 330, "南：巴士海峽", { anchor: "middle", fs: 17, bold: true }) + t(345, 352, "再往南是菲律賓", { anchor: "middle", fs: 14 });
+          s += t(40, 170, "西：臺灣海峽", { fs: 17, bold: true }) + t(40, 194, "對岸是中國大陸的福建", { fs: 14 });
+          s += compass(640, 300);
+          return wrap(690, 360, "臺灣四周（北在上）：北邊東海，東邊太平洋，南邊巴士海峽和菲律賓，西邊臺灣海峽和中國大陸的福建，東北方是琉球群島", s);
+        },
+        lines: ["臺灣四面都是海，是一座島。", "東邊是太平洋，西邊隔著臺灣海峽是中國大陸的福建。", "北邊是東海，南邊隔著巴士海峽是菲律賓。", "東北方是琉球群島。和別的地方比來說位置，叫相對位置。"],
+        task: "把地圖蓋住，說出東西南北各是哪片海。", ask: "從臺灣往南過了巴士海峽，會到哪個國家？" },
+      { name: "換個說法：海島位置帶來交流", svg: function () {
+          return board(["四面環海 → 船可以從各方向來", "不同時代有不同的人來到臺灣", "大家帶來自己的語言和習俗", "所以臺灣是多元族群文化的社會"], "海島位置與文化：四面環海，不同的人陸續來到，帶來語言和習俗，文化多元");
+        },
+        lines: ["臺灣四面環海，船隻可以從各方向來。", "不同時代，有不同的人來到臺灣生活。", "大家帶來各自的語言和習俗，形成多元的族群文化。"],
+        task: "想一想：你家附近有哪些不同文化的節日或食物？", ask: "為什麼海島位置會讓文化變多元？" }
+    ],
+    "1c": [
+      { name: "看圖：四種社會規範", svg: function () {
+          var s = '<rect width="690" height="300" rx="14" fill="var(--leaf-soft)"/>', K = [["風俗習慣", "大家長久習慣的做法", "例：過年發紅包"], ["宗教", "信仰帶來的規矩", "例：做禮拜、拜拜"], ["道德", "心裡覺得對不對", "例：誠實、不說謊"], ["法律", "國家訂的，違反會處罰", "例：紅燈要停下來"]];
+          K.forEach(function (k, i) { var x = 20 + i * 167; s += '<rect x="' + x + '" y="40" width="150" height="200" rx="12" fill="var(--card)" stroke="' + (i === 3 ? "var(--bad)" : "var(--leaf)") + '" stroke-width="2.5"/>' + t(x + 75, 76, k[0], { anchor: "middle", fs: 19, bold: true }) + t(x + 75, 120, k[1].slice(0, 7), { anchor: "middle", fs: 14 }) + t(x + 75, 142, k[1].slice(7), { anchor: "middle", fs: 14 }) + t(x + 75, 200, k[2].slice(0, 8), { anchor: "middle", fs: 13, fill: "var(--muted)" }) + t(x + 75, 220, k[2].slice(8), { anchor: "middle", fs: 13, fill: "var(--muted)" }); });
+          s += t(345, 280, "四種都在規範大家的行為；只有法律由國家強制執行", { anchor: "middle", fs: 16 });
+          return wrap(690, 300, "四種社會規範：風俗習慣、宗教、道德、法律；只有法律由國家強制執行，違反會被處罰", s);
+        },
+        lines: ["社會規範是大家共同遵守的行為規則。", "常見的有風俗習慣、宗教、道德和法律。", "違反道德或習俗，會被別人指責，或受良心責備。", "法律是國家訂的，違反會受到處罰。"],
+        task: "各舉一個風俗習慣、道德、法律的例子。", ask: "說謊和闖紅燈，哪一個違反法律？" },
+      { name: "換個說法：看「誰來管」", svg: function () {
+          return board(["自己的良心 → 道德", "身邊的人看法、長久習慣 → 風俗習慣", "信仰的教義和儀式 → 宗教", "國家的強制力、罰則 → 法律"], "分辨社會規範：靠良心是道德，靠習慣是風俗，靠信仰是宗教，靠國家強制是法律");
+        },
+        lines: ["遇到一件事，先問：違反了會怎樣？", "只有被別人說、自己愧疚，多半是道德或習俗。", "會被國家罰錢或處罰，就是法律。", "一件事可能同時是道德，也是法律。"],
+        task: "判斷：「偷東西」違反了哪幾種規範？", ask: "為什麼社會需要規範？" }
+    ],
+    "1d": [
+      { name: "看圖：法律怎麼來、管什麼", svg: function () {
+          var s = '<rect width="690" height="280" rx="14" fill="var(--sun-soft)"/>';
+          [["立法院通過", 30], ["總統公布", 260], ["大家都要遵守", 490]].forEach(function (k, i) { s += '<rect x="' + k[1] + '" y="36" width="170" height="60" rx="12" fill="var(--card)" stroke="var(--sun)" stroke-width="2.5"/>' + t(k[1] + 85, 73, k[0], { anchor: "middle", fs: 18, bold: true }); if (i < 2) s += arrow(k[1] + 176, 66, k[1] + 224, 66, "var(--sun-deep)", 4); });
+          s += '<rect x="30" y="130" width="300" height="120" rx="12" fill="var(--card)" stroke="var(--leaf)" stroke-width="2.5"/>' + t(180, 166, "保障權利", { anchor: "middle", fs: 19, bold: true, fill: "var(--leaf)" }) + t(180, 200, "例：受國民教育", { anchor: "middle", fs: 15 }) + t(180, 226, "例：兒童少年受保護", { anchor: "middle", fs: 15 });
+          s += '<rect x="360" y="130" width="300" height="120" rx="12" fill="var(--card)" stroke="var(--bad)" stroke-width="2.5"/>' + t(510, 166, "規定義務、違反會罰", { anchor: "middle", fs: 19, bold: true, fill: "var(--bad)" }) + t(510, 200, "例：依法納稅", { anchor: "middle", fs: 15 }) + t(510, 226, "例：違規要罰錢", { anchor: "middle", fs: 15 });
+          return wrap(690, 280, "法律經立法院通過、總統公布，大家都要遵守；法律保障權利，也規定義務，違反會被處罰", s);
+        },
+        lines: ["法律要經過立法院通過、總統公布。", "法律保障我們的權利，例如受教育。", "法律也規定義務，例如依法納稅。", "違反法律，可能被罰錢或受到處罰。"],
+        task: "說出一個法律保護兒童的例子。", ask: "法律只會處罰人嗎？還會做什麼？" },
+      { name: "換個說法：法律就在生活裡", svg: function () {
+          return board(["上學：受國民教育是權利也是義務", "騎機車：沒戴安全帽要罰錢", "兒童少年：不可以吸菸、喝酒", "滿 18 歲：在法律上成年"], "生活裡的法律：受國民教育、騎機車戴安全帽、兒童少年保護、滿十八歲成年");
+        },
+        lines: ["上學、坐機車、走在路上，都和法律有關。", "法律規定兒童少年不可以吸菸、喝酒。", "在我國，滿 18 歲才是法律上的成年人。"],
+        task: "從上學路上找一個和法律有關的事。", ask: "為什麼法律特別保護兒童和少年？" }
+    ],
+    "2a": [
+      { name: "看圖：五種地形（側面看）", svg: function () {
+          var s = '<rect width="690" height="300" rx="14" fill="var(--sky1)"/>';
+          // 剖面：左邊山地、丘陵、臺地、盆地（兩邊高中間低）、平原到海
+          var pts = [[0, 230], [20, 120], [55, 60], [90, 115], [120, 70], [150, 150], [175, 170], [200, 158], [225, 175], [250, 168], [265, 172],
+                     [272, 120], [355, 118], [362, 178], [390, 186], [420, 120], [440, 112], [455, 200], [520, 202], [560, 200], [600, 204], [640, 206], [640, 300], [0, 300]];
+          s += '<polygon points="' + pts.map(function (p) { return p[0] + 25 + "," + p[1]; }).join(" ") + '" fill="var(--grass)" stroke="var(--ink)" stroke-width="2"/>';
+          s += '<rect x="665" y="210" width="25" height="90" fill="var(--waterfill)"/>';
+          s += t(95, 40, "山地", { anchor: "middle", fs: 17, bold: true }) + t(95, 252, "高、陡", { anchor: "middle", fs: 13 });
+          s += t(220, 140, "丘陵", { anchor: "middle", fs: 17, bold: true }) + t(220, 252, "較低、起伏和緩", { anchor: "middle", fs: 13 });
+          s += t(338, 104, "臺地", { anchor: "middle", fs: 17, bold: true }) + t(338, 252, "頂上平、四周陡", { anchor: "middle", fs: 13 });
+          s += t(414, 178, "盆地", { anchor: "middle", fs: 15, bold: true }) + t(430, 278, "四周高、中間低", { anchor: "middle", fs: 13 });
+          s += t(580, 186, "平原", { anchor: "middle", fs: 17, bold: true }) + t(580, 252, "低、平坦", { anchor: "middle", fs: 13 });
+          s += t(670, 196, "海", { anchor: "end", fs: 13 }) + t(670, 24, "側面看（不是地圖）", { anchor: "end", fs: 13, fill: "var(--muted)" });
+          return wrap(690, 300, "地形側面示意：山地高又陡；丘陵較低、起伏和緩；臺地頂上平、四周陡；盆地四周高、中間低；平原低又平坦", s);
+        },
+        lines: ["山地：很高、坡很陡。", "丘陵：比山地低，高低起伏比較和緩。", "臺地：頂上平平的，但四周比較陡。", "盆地：四周被高地圍住，中間比較低。", "平原：又低又平坦，多在河邊或海邊。"],
+        task: "用手比出盆地和臺地的形狀，說出差別。", ask: "盆地和臺地，哪一個是「中間低」？" },
+      { name: "換個說法：用碗和桌子記", svg: function () {
+          return board(["盆地像一個碗：四周高、中間低", "臺地像一張桌子：上面平、四邊陡", "平原像攤平的紙：低又平", "丘陵像起伏的波浪，山地像高高的牆"], "用生活物品記地形：盆地像碗、臺地像桌子、平原像攤平的紙、丘陵像波浪、山地像高牆");
+        },
+        lines: ["盆地像碗，四周高、中間低。", "臺地像桌子，上面平、四邊陡。", "平原像攤平的紙，又低又平。", "平原和盆地地勢平坦，蓋房子、開路比較容易。"],
+        task: "用碗和桌子，各說一個盆地和臺地的例子。", ask: "為什麼平坦的地方比較容易蓋房子和開路？" }
+    ],
+    "2b": [
+      { name: "看圖：臺灣的五大山脈", svg: function () {
+          var P = proj(119.6, 122.4, 21.7, 25.5, 150, 20, 400), s = '<rect width="690" height="440" rx="14" fill="var(--waterfill)"/>' + island(P);
+          function rng(pts, color, name, lx, ly, anchor) { return '<polyline points="' + pts.map(function (q) { return P.X(q[0]).toFixed(1) + "," + P.Y(q[1]).toFixed(1); }).join(" ") + '" fill="none" stroke="' + color + '" stroke-width="7" stroke-linecap="round"/>' + t(lx, ly, name, { fs: 15, anchor: anchor, bold: true, fill: color }); }
+          s += rng([[121.55, 24.75], [121.30, 24.10], [121.05, 23.40], [120.85, 22.30]], "var(--soil)", "中央山脈（本島主幹）", 470, 120);
+          s += rng([[121.60, 24.95], [121.20, 24.55], [120.95, 24.20]], "var(--leaf)", "雪山山脈", 470, 70);
+          s += rng([[120.95, 23.75], [120.95, 23.47], [120.85, 23.10]], "var(--pri)", "玉山山脈", 470, 220);
+          s += rng([[120.70, 23.80], [120.60, 23.40], [120.55, 23.00]], "var(--sun)", "阿里山山脈", 20, 260);
+          s += rng([[121.55, 23.95], [121.35, 23.30], [121.15, 22.85]], "var(--bad)", "海岸山脈", 470, 300);
+          s += '<polygon points="' + P.X(120.95).toFixed(1) + "," + (P.Y(23.47) - 12).toFixed(1) + " " + (P.X(120.95) - 9).toFixed(1) + "," + (P.Y(23.47) + 5).toFixed(1) + " " + (P.X(120.95) + 9).toFixed(1) + "," + (P.Y(23.47) + 5).toFixed(1) + '" fill="var(--ink)"/>' + t(P.X(120.95) - 14, P.Y(23.47) + 4, "玉山", { anchor: "end", fs: 14, bold: true });
+          s += t(470, 360, "玉山主峰 3,952 公尺", { fs: 15 }) + t(470, 384, "是臺灣最高峰", { fs: 15 }) + compass(650, 70);
+          return wrap(690, 440, "臺灣五大山脈示意（北在上，位置約略）：由東到西是海岸山脈、中央山脈、雪山山脈、玉山山脈、阿里山山脈；中央山脈是本島主幹；臺灣最高峰玉山 3952 公尺", s);
+        },
+        lines: ["臺灣有五大山脈，由東到西是：", "海岸、中央、雪山、玉山、阿里山山脈。", "中央山脈北起蘇澳、南到鵝鑾鼻，是本島主幹。", "玉山主峰 3,952 公尺，是臺灣最高峰。"],
+        task: "閉上眼睛說出五大山脈的名字。", ask: "臺灣最高的山叫什麼？有多高？" },
+      { name: "換個說法：地形決定怎麼生活", svg: function () {
+          return board(["平原、盆地：平坦，蓋房子、開路比較容易", "臺北盆地、臺中盆地裡都有大城市", "山地：坡陡，蓋房子開路比較難", "河川短、坡度大：大雨時河水很快入海"], "地形和生活：平原盆地平坦容易建設，臺北盆地臺中盆地有大城市；山地坡陡較難建設；河川短坡度大，大雨時河水很快入海");
+        },
+        lines: ["人們會依照地形，決定怎麼使用土地。", "平坦的地方，蓋房子、開路比較容易。", "山地坡陡，建設比較困難。", "臺灣河川短、坡度大，大雨時河水很快流入大海。"],
+        task: "說一個你去過的地方，它是哪種地形？", ask: "為什麼山地的人口比平原少？" }
+    ],
+    "2c": [
+      { name: "看圖：北回歸線分出兩種氣候", svg: function () {
+          var P = proj(119.4, 122.6, 21.6, 25.6, 180, 20, 340), s = '<rect width="690" height="380" rx="14" fill="var(--pri-soft)"/>';
+          s += '<rect x="20" y="20" width="650" height="' + (P.Y(TROPIC) - 20).toFixed(1) + '" fill="var(--sky2)" opacity=".6"/>';
+          s += '<rect x="20" y="' + P.Y(TROPIC).toFixed(1) + '" width="650" height="' + (360 - P.Y(TROPIC)).toFixed(1) + '" fill="var(--sun-soft)"/>';
+          s += island(P) + '<line x1="20" y1="' + P.Y(TROPIC).toFixed(1) + '" x2="670" y2="' + P.Y(TROPIC).toFixed(1) + '" stroke="var(--red)" stroke-width="3" stroke-dasharray="10 6"/>';
+          s += t(440, P.Y(TROPIC) - 8, "北回歸線", { fs: 15, fill: "var(--red)" });
+          s += t(440, 80, "以北：副熱帶氣候", { fs: 18, bold: true }) + t(440, 280, "以南：熱帶氣候", { fs: 18, bold: true });
+          s += t(440, 312, "1 月平均氣溫：", { fs: 14 }) + t(440, 334, "臺北 16.4 度、高雄 19.7 度", { fs: 14 }) + compass(80, 70);
+          return wrap(690, 380, "臺灣氣候（北在上）：北回歸線以北是副熱帶氣候，以南是熱帶氣候；1 月平均氣溫臺北 16.4 度、高雄 19.7 度", s);
+        },
+        lines: ["北回歸線通過臺灣中南部。", "北回歸線以北是副熱帶氣候。", "北回歸線以南是熱帶氣候。", "1 月平均氣溫，高雄比臺北高。"],
+        task: "在地圖上指出你住的地方，說出是哪一種氣候。", ask: "屏東和臺北，冬天哪裡比較暖？" },
+      { name: "換個說法：位置和高度都會影響", svg: function () {
+          return board(["越往南（越靠近赤道）→ 通常越暖", "越往高處 → 氣溫越低", "所以高山上冬天可能會下雪", "地形擋住季風 → 各地雨量不一樣"], "影響氣候的因素：緯度越低越暖、地勢越高越冷、地形擋住季風讓各地雨量不同");
+        },
+        lines: ["越靠近赤道，通常越溫暖。", "地勢越高，氣溫越低，高山比平地冷。", "山脈擋住季風，讓各地雨量不同。"],
+        task: "比較平地和高山的氣溫，說出原因。", ask: "為什麼玉山上冬天可能會下雪？" }
+    ],
+    "2d": [
+      { name: "看圖：冬天和夏天的季風", svg: function () {
+          var s = '<rect width="690" height="320" rx="14" fill="var(--waterfill)"/>';
+          [[0, "冬季：東北季風", "var(--pri)", 1], [345, "夏季：西南季風", "var(--sun-deep)", -1]].forEach(function (k) {
+            var P = proj(119.2, 122.8, 21.4, 25.8, k[0] + 98, 50, 200);
+            s += island(P) + t(k[0] + 172, 34, k[1], { anchor: "middle", fs: 18, bold: true });
+            for (var i = 0; i < 3; i++) {
+              var ox = k[0] + 60 + i * 50, oy = 60 + i * 50;
+              s += k[3] > 0 ? arrow(ox + 150, oy, ox + 70, oy + 80, k[2], 5) : arrow(ox, oy + 120, ox + 80, oy + 40, k[2], 5);
+            }
+            s += compass(k[0] + 310, 300);
+          });
+          s += t(172, 300, "從東北吹向西南", { anchor: "middle", fs: 15 }) + t(517, 300, "從西南吹向東北", { anchor: "middle", fs: 15 });
+          return wrap(690, 320, "臺灣的季風（北在上）：冬季吹東北季風，從東北吹向西南；夏季吹西南季風，從西南吹向東北", s);
+        },
+        lines: ["季風是隨季節改變方向的風。", "冬天吹東北季風，迎風的北部和東部比較多雨。", "夏天吹西南季風。", "5、6 月是梅雨季，常常連續下雨。"],
+        task: "用手比出冬天和夏天季風吹來的方向。", ask: "冬天的季風從哪個方向吹來？" },
+      { name: "換個說法：颱風來了怎麼辦", svg: function () {
+          return board(["7 到 9 月是颱風季，帶來強風豪雨", "颱風的雨水是重要的水資源", "颱風來前：備手電筒、乾糧，檢查門窗", "颱風來時：不去海邊、溪邊，也不登山"], "颱風和防災：7 到 9 月是颱風季，帶來強風豪雨，也是重要水資源；來前備手電筒乾糧、檢查門窗，來時不去海邊溪邊、不登山");
+        },
+        lines: ["每年 7 到 9 月是臺灣的颱風季。", "颱風帶來強風豪雨，也帶來重要的水資源。", "颱風來前，準備手電筒、乾糧，檢查門窗。", "颱風期間，不要到海邊、溪邊，也不要登山。"],
+        task: "列出你家颱風前要準備的三樣東西。", ask: "颱風對臺灣只有壞處嗎？" }
+    ]
+  };
+  // 「一句一句看懂」先想想看（每個觀念一題；想錯也沒關係）
+  var PREDICT = {
+    "1a": { q: "先想想看：北回歸線大約在北緯幾度？", opts: ["北緯 0 度", "北緯 23.5 度", "北緯 66.5 度"], a: 1, why: "北回歸線約在北緯 23.5 度，通過嘉義、花蓮和澎湖。" },
+    "1b": { q: "先想想看：臺灣的東邊是哪一片海洋？", opts: ["太平洋", "臺灣海峽", "巴士海峽"], a: 0, why: "臺灣東邊是太平洋；臺灣海峽在西邊，巴士海峽在南邊。" },
+    "1c": { q: "先想想看：哪一種社會規範，違反了會被國家處罰？", opts: ["道德", "風俗習慣", "法律"], a: 2, why: "法律由國家強制執行，違反會受到處罰。" },
+    "1d": { q: "先想想看：法律要經過哪裡通過？", opts: ["學校", "立法院", "里長"], a: 1, why: "法律要經過立法院通過、總統公布。" },
+    "2a": { q: "先想想看：四周高、中間低的地形叫什麼？", opts: ["臺地", "盆地", "丘陵"], a: 1, why: "盆地四周被高地圍住，中間低；臺地是頂上平、四周陡。" },
+    "2b": { q: "先想想看：哪一條山脈是臺灣本島的主幹？", opts: ["海岸山脈", "中央山脈", "阿里山山脈"], a: 1, why: "中央山脈北起蘇澳、南到鵝鑾鼻，是本島主幹。" },
+    "2c": { q: "先想想看：北回歸線以南是哪一種氣候？", opts: ["熱帶", "副熱帶", "寒帶"], a: 0, why: "北回歸線以南屬熱帶氣候，以北屬副熱帶氣候。" },
+    "2d": { q: "先想想看：冬天吹的是哪一種季風？", opts: ["西南季風", "東北季風"], a: 1, why: "冬天吹東北季風，夏天吹西南季風。" }
+  };
+  var api = { EXPLAIN: EXPLAIN, PREDICT: PREDICT, TW: TW, TROPIC: TROPIC };
+  if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5SocExplain = api;
+})(typeof window !== "undefined" ? window : this);
