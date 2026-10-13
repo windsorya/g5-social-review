@@ -40,7 +40,7 @@ test("標準③白話：解說每一句不超過小五句長上限", () => {
   assert.deepEqual(long, []);
 });
 
-const SITES = ["g5-sci-review", "g5-math-review", "g5-help", "g5-chinese-review"];   // 本站以外的四站；本站是 aria-current 的那一格
+const SITES = ["g5-sci-review", "g5-math-review", "g5-help", "g5-chinese-review", "g5-wrong-review"];   // 本站以外的五站；本站是 aria-current 的那一格
 test("標準④五站切換列、⑤不被搜尋引擎收錄", () => {
   const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
   const nav = (/<nav id="siteNav"[\s\S]*?<\/nav>/.exec(html) || [""])[0];

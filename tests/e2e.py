@@ -57,7 +57,8 @@ def flow_main(browser, label, device=None):
     check(f"{label} 小考複習列出第一、二單元", all(pg.locator(f'button[data-rv="u{u}"]').count() == 1 for u in ["s1", "s2"]))
     check(f"{label} 沒有水平捲動", no_overflow(pg))
     want = {"五上自然複習": "https://windsorya.github.io/g5-sci-review/", "五上數學複習": "https://windsorya.github.io/g5-math-review/",
-            "難題解說": "https://windsorya.github.io/g5-help/", "五上國語複習": "https://windsorya.github.io/g5-chinese-review/"}
+            "難題解說": "https://windsorya.github.io/g5-help/", "五上國語複習": "https://windsorya.github.io/g5-chinese-review/",
+            "錯題複習": "https://windsorya.github.io/g5-wrong-review/"}
     got = {a.inner_text(): a.get_attribute("href") for a in pg.locator("#siteNav a").all()}
     check(f"{label} 五站切換列（#1333／#1351）：四個連結＋本站「五上社會複習」", got == want and pg.locator('#siteNav [aria-current="page"]').inner_text() == "五上社會複習", got)
     pg.locator("#goAll").click()
