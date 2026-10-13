@@ -386,6 +386,9 @@ def flow_upload(browser, subject, site, bank_global):
     sent, mode = [], {"fail_js": True}
     def gas(route):
         req = _j.loads(route.request.post_data or "{}")
+        if route.request.method != "POST" or not req:   # GET 等非 JSON POST：從網址參數取 op，並記方法（審 684ecc8：GET 漏算）
+            from urllib.parse import urlparse as _u, parse_qsl as _q
+            req = dict(_q(_u(route.request.url).query), _method=route.request.method)
         sent.append(req)
         body = {"ok": True, "id": "u1"} if req.get("op") == "upload" else {"ok": True, "items": [], "lastFetch": 0} if req.get("op") == "mine" else {"ok": False, "err": "test"}
         route.fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=_j.dumps(body))
@@ -408,10 +411,11 @@ def flow_upload(browser, subject, site, bank_global):
     pg.locator("#upBox summary").click(); pg.locator("#upBox summary").click()
     # 補題區已關功能（g5-help upload.js ENABLED=false，迴圈 L20261013134831-7db82f 會診後第 2 次 FAIL）：只顯示暫停說明、導向難題站、0 請求
     pg.wait_for_function("document.getElementById('g5upload').textContent.indexOf('補題區暫停使用') >= 0", timeout=20000)
-    check(f"補題區 暫停：說明＋難題站連結、沒有表單", pg.locator("#g5upload a[href='https://windsorya.github.io/g5-help/']").count() == 1 and pg.locator("#g5upload .g5u-send, #g5upload .g5u-file").count() == 0)
+    link = pg.locator("#g5upload a[href='https://windsorya.github.io/g5-help/']")
+    check(f"補題區 暫停：說明與難題站連結看得見、沒有表單", pg.locator("#g5upload .g5u-msg", has_text="補題區暫停使用").is_visible() and link.count() == 1 and link.is_visible() and pg.locator("#g5upload .g5u-send, #g5upload .g5u-file").count() == 0)   # 審 684ecc8：只比 textContent 會放過 hidden
     pg.wait_for_timeout(500)
-    up_ops = [r for r in sent if r.get("op") in ("upload", "mine", "withdraw")]   # 本站同步自己的 op:get 不算補題區
-    check(f"補題區 暫停：補題區沒有送出任何請求（upload／mine／withdraw＝0）", not up_ops, up_ops[:2])
+    up_ops = [r for r in sent if r.get("op") != "get"]   # 只有本站同步自己的 op:get 不算；其餘（含 GET、沒有 op 的請求）一律算補題區送出
+    check(f"補題區 暫停：補題區沒有送出任何請求（除本站同步 op:get 外＝0，含 GET）", not up_ops, up_ops[:2])
     check(f"補題區 沒有水平捲動", no_overflow(pg))
     # 做好了的連結 #c/<觀念id> 直接打開那個觀念；不存在的觀念留在首頁
     cid = pg.evaluate(f"Object.keys(window.{bank_global}.CONCEPTS)[0]")
