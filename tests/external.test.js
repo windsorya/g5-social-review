@@ -709,6 +709,14 @@ test("A16 壞檔（SCHEMA）：狀態是 blocked、作答 BLOCKED；家長清除
   assert.ok(st.dispatch(op("answer", { cardId: "s1", ok: true })).ok);
 });
 
+test("A16b 壞檔＋先讀失敗一次（readFailed 殘留）：恢復儲存後家長清除成功，狀態直接回 ok、作答照收（審 Codex 1e929cd）", () => {
+  const b = bank(["s1"]); const mem = pdisk({ [C.LS_KEY]: "{壞" }); const st = open(mem, b, sess());
+  mem.failNth("get", 0); st.check(); mem.failNth("get", -1);
+  assert.equal(st.discardBroken(), true);
+  assert.equal(st.get().storageStatus, "ok");
+  assert.ok(st.dispatch(op("answer", { cardId: "s1", ok: true })).ok);
+});
+
 test("A07 待存答案在 resume 中補存成功、接著 tick 讀失敗：答案已存但不算成功；回饋資訊留在核心，下次 resume 成功後 takeInfo 取得一次（畢業）", () => {
   const b = bank(["s1"]); const mem = pdisk(); const st = open(mem, b, sess());
   const s = JSON.parse(JSON.stringify(C.blankState())); s.cards.s1 = { seen: 2, goodDays: ["2026-10-17", "2026-10-18"], blockedDay: null, due: D };
@@ -767,7 +775,7 @@ test("N24 四站 createStore 逐字相同（SHA-256）；本站 docs 有暫停�
   const src = fs.readFileSync(path.join(root, "src/core.js"), "utf8");
   const a = src.indexOf("  function createStore(opt) {"), b = src.indexOf("  /* ---------- 溶解帳本");
   assert.ok(a > 0 && b > a, "找不到 createStore");
-  assert.equal(crypto.createHash("sha256").update(src.slice(a, b)).digest("hex"), "9aafb142692cfdd58eb38b4029de6ac7b8e8ee8c67e122594ef69a6eabebe4f5", "本站 createStore 和四站共同版本不同");
+  assert.equal(crypto.createHash("sha256").update(src.slice(a, b)).digest("hex"), "cff42ed04be2e207d127e93d8d25983479518034362219b8bc046c36d9e3bc9f", "本站 createStore 和四站共同版本不同");
   const f = "docs/design-storage-pause-20261014.md";
   assert.equal(crypto.createHash("sha256").update(fs.readFileSync(path.join(root, f))).digest("hex"), "e94b2a92632bb7a1a699b512ac2dd99480c2a9792b314c714858e993a91405cf", f + " 和四站不一致");
   assert.equal(cp.execFileSync("git", ["ls-files", "--error-unmatch", f], { cwd: root }).toString().trim(), f);

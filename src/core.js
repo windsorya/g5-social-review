@@ -693,7 +693,7 @@
       var b0 = blankState();
       if (checkState(b0, bank).length) return false;
       try { storage.setItem(LS_KEY, JSON.stringify(b0)); lastRaw = JSON.stringify(b0); } catch (e) { st.saveStatus = "failed"; return false; }
-      st.loadError = null; st.migrateReason = null; st.state = b0; st.saveStatus = "ok"; st.pendingAction = null; status();
+      st.loadError = null; st.migrateReason = null; st.state = b0; st.saveStatus = "ok"; st.pendingAction = null; st.readFailed = false; status();   // 清除成功＝已讀寫成功，殘留 readFailed 一併解除（審 Codex 1e929cd）
       return true;
     }
     return { get: function () { return st; }, load: load, dispatch: dispatch, retry: retry, resume: resume, takeInfo: takeInfo, accepted: accepted, discardBroken: discardBroken,

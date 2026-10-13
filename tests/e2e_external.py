@@ -1505,6 +1505,92 @@ def a23(browser, label, dev):
         ctx.close()
 
 
+def a24(browser, label, dev):
+    """A24（Codex 審 1e929cd／5c3de92／9bd757d：#cBack 繞過 U3）：觀念頁設定寫失敗 → 暫停；直接觸發「回首頁」handler：不換頁、仍在觀念頁。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        start(B)
+        if not B.has("#concepts .ccard"):
+            print(f"SKIP {label} A24 本站首頁沒有觀念卡"); return
+        B.p.locator("#concepts .ccard").first.click()
+        if not B.has("#cBack"):
+            print(f"SKIP {label} A24 本站觀念頁沒有回首頁鈕"); return
+        B.ev("() => { window.__failSet = true; const s = document.querySelector('#snd'); if (s) { s.value = s.value === 'off' ? '0' : 'off'; s.dispatchEvent(new Event('change')); } window.__failSet = false; }")
+        masked = B.has(MASK)
+        B.ev("() => { const b = document.querySelector('#cBack'); if (b) b.click(); }")
+        check(f"{label} A24 暫停中直接觸發觀念頁「回首頁」：不換頁、仍在觀念頁",
+              masked and B.has("#cBack") and not B.errors, {"遮罩": masked, "cBack": B.has("#cBack"), "errors": B.errors})
+    finally:
+        ctx.close()
+
+
+def a25(browser, label, dev):
+    """A25（Codex 審 9bd757d：恢復會跳過答錯解說）：答錯停在解說 → 切回分頁 tick 寫失敗 → 恢復後再試一次：留在原題、解說還在、沒跳下一題。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        start(B); hit = False
+        for _ in range(30):
+            if B.has("#main .opt"):
+                q = B.p.locator("#main .q").first.inner_text(); n = B.p.locator("#main .opt").count()
+                k = (KNOWN[q] + 1) % n if q in KNOWN else 0
+                B.p.locator(f'#main .opt[data-i="{k}"]').click()
+                right = int(B.p.locator("#main .opt.right").first.get_attribute("data-i")) if B.has("#main .opt.right") else None
+                if right is not None:
+                    KNOWN[q] = right
+                if right is not None and right != k:
+                    hit = True; break
+            else:
+                answer(B)
+            if B.has('#errq button[data-k=""]'):
+                B.p.locator('#errq button[data-k=""]').click()
+            if B.has("#next"):
+                B.p.locator("#next").click()
+            else:
+                start(B)
+        if not hit:
+            check(f"{label} A25 找得到答錯的題", False, "沒有"); return
+        q0 = B.ev(QTXT); fb0 = B.ev(FB); err0 = B.has("#errq")
+        B.ev("() => { window.__failSetV = 0; }"); B.ev(SYNC_VIS)
+        masked = B.has(MASK)
+        B.ev("() => { window.__failSetV = -1; }")
+        if B.has("#retrySave"):
+            B.p.locator("#retrySave").click()
+        check(f"{label} A25 答錯停在解說時暫停、恢復後再試一次：留在原題、解說／補救入口還在",
+              masked and B.ev(QTXT) == q0 and B.ev(FB) == fb0 and B.has("#errq") == err0 and not B.has(MASK) and not B.errors,
+              {"遮罩": masked, "同題": B.ev(QTXT) == q0, "errq": [err0, B.has("#errq")], "errors": B.errors})
+    finally:
+        ctx.close()
+
+
+def a26(browser, label, dev):
+    """A26（Codex 審 5c3de92：例句返回丟上下文）：實驗做第一個任務時寫失敗 → 暫停；直接觸發實驗的「回首頁」：仍在實驗；恢復後再試一次：同一輪續接。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        if not open_lab(B):
+            check(f"{label} A26 找得到實驗", False, "沒有"); return
+        predict(B)
+        if not B.has("#labHome"):
+            print(f"SKIP {label} A26 本站實驗沒有「回首頁」鈕"); return
+        before = B.ev(LAST_RUN)
+        B.ev("() => { window.__failSet = true; }")
+        do_task(B, 0)
+        B.ev("() => { window.__failSet = false; }")
+        masked = B.has(MASK)
+        B.ev("() => { const b = document.querySelector('#labHome'); if (b) b.click(); }")
+        stay = B.has("#labHome")
+        if B.has("#retrySave"):
+            B.p.locator("#retrySave").first.click()
+        after = B.ev(LAST_RUN)
+        check(f"{label} A26 暫停中觸發實驗「回首頁」：仍在實驗；再試一次後同一輪續接、第一個任務記到",
+              masked and stay and B.has("#labHome") and after and before and after["id"] == before["id"] and 0 in after["tasksDone"] and not B.errors,
+              {"遮罩": masked, "stay": stay, "before": before, "after": after, "errors": B.errors})
+    finally:
+        ctx.close()
+
+
 FLOWS = [
     ("T01", t01, ()), ("T02", t02, ()), ("T03", t03, ()), ("T04", t04, ()),
     ("T05", t05, ("removeItem",)), ("T05", t05, ("clear",)),
@@ -1521,7 +1607,7 @@ FLOWS = [
     ("T27", t27, ("未變",)), ("T27", t27, ("已刪",)), ("T28", t28, ()),
     ("R01", r01, ()), ("R02", r02, ()), ("R03", r03, ()), ("R04", r04, ("同日",)), ("R04", r04, ("跨日",)), ("R05", r05, ()),
     ("R27", r27, ()), ("R28", r28, ()), ("R29", r29, ()), ("R30", r30, ()), ("R31", r31, ()),
-    ("A01", a01, ()), ("A02", a02, ()), ("A08", a08, ()), ("A09", a09, ()), ("A11", a11, ()), ("A12", a12, ()), ("A13", a13, ()), ("A14", a14, ()), ("A16", a16, ()), ("A21", a21, ()), ("A22", a22, ()), ("A23", a23, ()),
+    ("A01", a01, ()), ("A02", a02, ()), ("A08", a08, ()), ("A09", a09, ()), ("A11", a11, ()), ("A12", a12, ()), ("A13", a13, ()), ("A14", a14, ()), ("A16", a16, ()), ("A21", a21, ()), ("A22", a22, ()), ("A23", a23, ()), ("A24", a24, ()), ("A25", a25, ()), ("A26", a26, ()),
 ]
 
 

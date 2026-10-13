@@ -316,7 +316,8 @@ function resumeUI(reason){
     // 遮罩期間不可能換頁，所以原題還在：這一題確認存好才公布（回饋資訊由核心保存，K5）
     if(pending&&!pending.published&&store.accepted(pending.a.id)&&$("#ansBox")){feedback(pending,store.takeInfo(pending.a.id)||{});return;}
     if(dayChanged){ if(screen==="practice") route(); else renderHome(); renderSide(); }
-    else if(reason==="retry"){ if(!labRefresh(r)) route(); }
+    else if(reason==="retry"){ if(screen==="practice"&&pending&&pending.published&&store.accepted(pending.a.id)&&$("#ansBox")){renderSide();}   // 停在已公布的解說（含答錯補救）：留在原題，不跳下一題（審 Codex：恢復跳過解說）
+      else if(!labRefresh(r)) route(); }
     else if(screen==="home") renderHome();
     else { if(screen==="lab") labRefresh(r); renderSide(); }
   } finally { resuming=false; }
@@ -425,7 +426,7 @@ function route(){
   return renderHome();
 }
 function renderHome(boot){
-  if(!boot&&!canGo()){banners();return;}   // 4agent 方案 (a) U3（開頁那一次照畫，遮罩蓋在上面）
+  if(boot!==true&&!canGo()){banners();return;}   // 只有開頁那一次 renderHome(true) 豁免；被當 click handler 時收到的事件物件不算（審 Codex：#cBack 繞過 U3）   // 4agent 方案 (a) U3（開頁那一次照畫，遮罩蓋在上面）
   screen="home"; leaveLab();
   var v=V(), se=v.session, left=v.remainingIds.length, el=$("#main"), h;
   var inRound=se&&se.day===v.today&&se.queue.length&&!se.halted&&se.answered.length>0;
@@ -881,12 +882,12 @@ function drawNav(){
   if(lab.ctx.from==="wrong"){
     nav.innerHTML='<button class="btn" type="button" id="labDone"'+(all?'':' disabled')+'>'+(all?'我看懂了，換一題確認':(rr.prediction===null?'先想一想，再看解說':'每一句都看過後就能換一題確認'))+'</button><button class="btn ghost sm" type="button" id="labSkip">先回到練習</button>';
     on("#labDone",function(){if(!canGo()){banners();return;}stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(!(r.ok||r.dup)||r.storageStatus!=="ok")return;lab=null;screen="practice";route();});
-    on("#labSkip",function(){stopAnim();lab=null;screen="practice";route();});
+    on("#labSkip",function(){if(!canGo()){banners();return;}stopAnim();lab=null;screen="practice";route();});
   }else{
     nav.innerHTML='<button class="btn" type="button" id="labDone"'+(all?'':' disabled')+'>'+(all?'完成了':'每一步都看過後按這裡')+'</button><button class="btn ghost sm" type="button" id="labHome">回首頁</button>';
     on("#labDone",function(){if(!canGo()){banners();return;}stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(!(r.ok||r.dup)||r.storageStatus!=="ok")return;lab=null;
       $("#main").innerHTML='<div class="done"><b class="t">看完了</b><p class="muted" style="margin:0">把解說看懂了，再回去練卡片或考考爸媽。</p><div class="row" style="justify-content:center"><button class="btn ghost" type="button" id="back3">回首頁</button></div></div>';on("#back3",renderHome);renderSide();});
-    on("#labHome",function(){stopAnim();lab=null;renderHome();});
+    on("#labHome",function(){if(!canGo()){banners();return;}stopAnim();lab=null;renderHome();});   // 暫停中先擋，不先清掉 lab（審 Codex 5c3de92 同型）
   }
 }
 
