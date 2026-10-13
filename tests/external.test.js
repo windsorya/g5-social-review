@@ -798,3 +798,26 @@ test("R21 自然站：未確認後強制重開——V 在就照 V 載入、不�
     else { assert.equal(st2.get().loadError, "LEGACY"); assert.equal(mem.raw[C.LS_KEY], undefined); }
   }
 });
+
+/* ---------- 第 3 輪（Codex 審 9b88c94／1e51dc0／47486df／55509eb）四站共同：待存 ID 分離、tick 未完成不前進 ---------- */
+test("R27 待存 ID 分離：核心另有待存（設定）時作答遇 READ——回 READ、pendingId 仍是設定（不是本次作答）；resume(本次作答) 依序補存設定再存答案，同一 id 只存一次、infos 帶答案的結果", () => {
+  const b = bank(["s1"]); const { mem, st } = okStore(b);
+  const set = op("settings", { sound: false }), ans = op("answer", { cardId: "s1", ok: true });
+  mem.fail("set", C.LS_KEY, { once: true }); assert.equal(st.dispatch(set).error, "SAVE_FAILED");
+  mem.fail("get", C.LS_KEY, { once: true });
+  const r = st.dispatch(ans);
+  assert.deepEqual([r.ok, r.error, r.pendingId], [false, "READ", set.id]); assert.equal(st.accepted(ans.id), false);
+  const z = st.resume(ans);
+  assert.ok(z.ok); assert.equal(z.storageStatus, "ok"); assert.deepEqual(z.acceptedIds.sort(), [ans.id, set.id].sort());
+  assert.ok(z.infos && z.infos[ans.id], "沒有帶回本次作答的結果");
+  const s = JSON.parse(mem.raw[C.LS_KEY]); assert.equal(s.settings.sound, false); assert.equal(s.log.length, 1);
+  const z2 = st.resume(ans); assert.ok(z2.ok); assert.equal(JSON.parse(mem.raw[C.LS_KEY]).log.length, 1, "同一題記了兩次");
+});
+
+test("R28 tick 沒做完（tickDue）時，其他操作寫入成功也不算整體 ok：storageStatus 維持 saveFailed，resume 補完 tick 才回 ok", () => {
+  const b = bank(["s1"]); const { mem, st } = okStore(b);
+  mem.fail("set", C.LS_KEY, { once: true }); assert.equal(st.dispatch({ type: "tick" }).error, "SAVE_FAILED");
+  const r = st.dispatch(op("answer", { cardId: "s1", ok: true }));
+  assert.equal(r.ok, true); assert.equal(r.storageStatus, "saveFailed", "tick 沒做完卻回整體 ok"); assert.equal(st.get().tickDue, true);
+  const z = st.resume(); assert.ok(z.ok); assert.equal(z.storageStatus, "ok"); assert.equal(st.get().tickDue, false);
+});

@@ -302,17 +302,26 @@ var reloadNote=store.get().reloadNotice, outdatedOn=false, reloading=false;
 // 補充設計 task-mv6ujb6v-51m58n C3：切回分頁與「再存一次」走同一條恢復流程 store.resume()（查存檔→補存待存→tick）；
 // 整條都成功（storageStatus＝ok）才公布答案、前進或切畫面，任何一步失敗就停在原畫面（句數、runId、lab 都不動）。
 // 提示一律由 banners() 依核心的 storageStatus 畫出（C1）：沒有別處可以自己清掉的「讀不到」旗標。同一時間只跑一條恢復流程。
+// 第 3 輪（Codex 審 1e51dc0 等）：往前走（下一步、完成鈕、公布答案）之前，整體存檔狀態必須是 ok（沒有待存、tick 已做完）；
+// 不是就先 resume，失敗就留在原處。fresh＝先重讀存檔確認沒被改、讀得到
+function ready(fresh){
+  if(fresh){var ck=store.check(); if(ck.error==="STATE_CHANGED"){outdated();return false;} banners(); if(!ck.ok) return false;}   // 讀到了也重畫提示（讀不到的提示要收起）
+  if(store.get().storageStatus==="ok") return true;
+  var z=store.resume(); if(z.error==="STATE_CHANGED"){outdated();return false;} banners();
+  return !!(z.ok&&z.storageStatus==="ok");
+}
 var resuming=false;
 function resumeUI(reason){
   if(outdatedOn||resuming) return;
   resuming=true;
   try{
-    var dayChanged=V().today!==shownDay, r=store.resume();
+    var held=(pending&&!pending.published&&$("#saveFail[data-p]"))?pending.a:null;   // 畫面上還沒存進去的這一題（核心待存可能是另一筆）
+    var dayChanged=V().today!==shownDay, r=store.resume(held);
     if(r.error==="STATE_CHANGED"){outdated();return;}
     banners();
     if(!(r.ok&&r.storageStatus==="ok")) return;
     // 這一輪確認存進去的答案才公布（用本輪結果的快照，不用先前的 accepted()）
-    if(pending&&!pending.published&&$("#saveFail[data-p]")&&r.state.ops.indexOf(pending.a.id)>=0){$("#saveFail[data-p]").remove();feedback(pending,r.info||{});return;}
+    if(pending&&!pending.published&&$("#saveFail[data-p]")&&r.state.ops.indexOf(pending.a.id)>=0){$("#saveFail[data-p]").remove();feedback(pending,(r.infos&&r.infos[pending.a.id])||r.info||{});return;}
     if(dayChanged){ if(screen==="practice") route(); else renderHome(); renderSide(); }
     else if(reason==="retry"){ if(!labRefresh(r)) route(); }
     else if(screen==="home") renderHome();
@@ -613,8 +622,7 @@ function renderPractice(){
   el.innerHTML=h; wireTools(c);
   el.querySelectorAll(".opt").forEach(function(b){b.onclick=function(){
     var i=+b.dataset.i, ok=i===c.a; ui.picked=i;
-    el.querySelectorAll(".opt").forEach(function(x){x.disabled=true;if(+x.dataset.i===c.a)x.classList.add("right");});
-    if(!ok) b.classList.add("wrong");
+    el.querySelectorAll(".opt").forEach(function(x){x.disabled=true;});   // 第 3 輪（Codex 審 55509eb）：對錯等這一題確認存好、公布回饋時才標
     submit(c,ok,meta());
   };});
 }
@@ -623,10 +631,16 @@ function wireTools(c){
 }
 function meta(){var u=$("#unsure");return {unsure:!!(u&&u.checked),hint:ui.hint};}
 var pending=null;
+// 選擇題的正解／錯解只在公布回饋時標（這一題已確認存好）
+function markOpts(p){var el=$("#main");if(!el||!p.c.opts)return;el.querySelectorAll(".opt").forEach(function(x){var i=+x.dataset.i;if(i===p.c.a)x.classList.add("right");else if(!p.ok&&i===p.picked)x.classList.add("wrong");});}
 function submit(c,ok,m,selfGraded){
   var a={type:"answer",id:newId(),cardId:c.id,ok:ok,hint:!!m.hint,unsure:!!m.unsure,variation:!!ui.variation};
-  var r=act(a);
-  if(r.error==="STATE_CHANGED") return;   // 存檔換代：這一題不公布對錯，交給重載
+  // 第 3 輪（Codex 審 1e51dc0 等）：另有待存或 tick 沒做完（storageStatus 不是 ok）時，改走 resume(這一題)：
+  // 依序補存核心的待存、送這一題（同一 id 只存一次）、補 tick；只有整體 ok 而且這一題 id 真的在存檔裡才公布
+  var st0=store.get(), r=st0.storageStatus==="ok"?act(a):store.resume(a), info0=r.info;
+  if(r.error==="STATE_CHANGED"){outdated();return;}   // 存檔換代：這一題不公布對錯，交給重載
+  if(r.ok&&r.storageStatus!=="ok"){r=store.resume(a);if(r.error==="STATE_CHANGED"){outdated();return;}}
+  banners();
   if(!r.ok&&!r.dup&&r.error==="SAVE_PENDING"){
     $("#ansBox").insertAdjacentHTML("beforeend",'<div class="fb no" id="saveFail"><strong>上一步還沒存到這台裝置，這一題先不算</strong><span class="small">按上方的「再存一次」，存好以後再作答這一題。</span></div>');
     // R2（4agent M04）：1.6 秒後重繪前先確認她還在同一題的答題畫面；已離開（觀念頁、實驗室、首頁）就不搶回
@@ -634,13 +648,14 @@ function submit(c,ok,m,selfGraded){
     setTimeout(function(){if(screen==="practice"&&ui===here)renderPractice();},1600);
     return;
   }
-  pending={a:a,c:c,ok:ok,m:m,selfGraded:selfGraded};
-  if(!r.ok&&!r.dup){
+  pending={a:a,c:c,ok:ok,m:m,selfGraded:selfGraded,picked:ui.picked};
+  // 待存 ID 分離：用核心回傳的結果判斷「這一題存了沒」，不是看 ok——核心待存可能是另一筆（例如設定）
+  if(!(r.ok&&r.storageStatus==="ok"&&r.state.ops.indexOf(a.id)>=0)){
     $("#ansBox").insertAdjacentHTML("beforeend",'<div class="fb no" id="saveFail" data-p="1"><strong>這一題還沒存到這台裝置</strong><div class="row"><button class="btn sm" type="button" id="saveAgain">再存一次</button></div></div>');
     on("#saveAgain",retrySave); banners();
     return;
   }
-  feedback(pending,r.info||{});
+  feedback(pending,(r.infos&&r.infos[a.id])||info0||{});
 }
 // 兩個「再存一次」（上方提示列、題目下方）走同一條路：存成功才公布回饋
 function retrySave(){resumeUI("retry");}   // 上方與題目下方的按鈕都走同一條恢復流程（補充設計 C3）
@@ -655,7 +670,7 @@ function labRefresh(verified){
   return true;
 }
 function feedback(p,info){
-  p.published=true;
+  p.published=true; markOpts(p);
   var c=p.c, ok=p.ok, shaky=ok&&(p.m.unsure||p.m.hint), box=$("#ansBox");
   if(ok){
     var today=V().today, before=S().log.some(function(e){return e.card===c.id&&!e.ok&&e.d<today;});
@@ -851,20 +866,22 @@ function check(i){
   // Codex 審 e195ef98：這一句是之前補存進去的（visibilitychange／再存一次），也要重繪任務與完成鈕，不然完成鈕一直停用
   // 已存過也要先確認存檔沒被別處改掉（Codex 審 04f1e26／889660d／c10c0f9 T08：補存後同頁刪檔，這條捷徑不經 act() 就前進）
   // 設計 task-mv6srlue-pujdyl S3：只有 check().ok===true 才前進；讀不到（READ）也不前進（Codex 審 058240f／8959313／a088333：只攔 STATE_CHANGED、READ 照樣前進）
-  if(rr.tasksDone.indexOf(i)>=0){var ck=store.check();if(ck.error==="STATE_CHANGED"){outdated();return false;}banners();if(!(ck.ok&&ck.storageStatus==="ok"))return false;drawTasks();drawNav();if(rr.tasksDone.length>=rr.tasks)drawPredict();return true;}
+  if(rr.tasksDone.indexOf(i)>=0){if(!ready(true))return false;drawTasks();drawNav();if(rr.tasksDone.length>=rr.tasks)drawPredict();return true;}
+  if(!ready(false)) return false;   // 第 3 輪：tick 沒做完／另有待存就先補，補不了留在原句
   var r=act({type:"labTask",runId:lab.runId,task:i});
-  if(r.ok){drawTasks();drawNav();if(run().tasksDone.length>=run().tasks)drawPredict();}
-  return !!(r.ok||r.dup);
+  if(!((r.ok||r.dup)&&r.storageStatus==="ok")) return false;
+  drawTasks();drawNav();if(run().tasksDone.length>=run().tasks)drawPredict();
+  return true;
 }
 function drawNav(){
   var rr=run(), all=rr.prediction!==null&&rr.tasksDone.length>=rr.tasks, nav=$("#labNav");
   if(lab.ctx.from==="wrong"){
     nav.innerHTML='<button class="btn" type="button" id="labDone"'+(all?'':' disabled')+'>'+(all?'我看懂了，換一題確認':(rr.prediction===null?'先想一想，再看解說':'每一句都看過後就能換一題確認'))+'</button><button class="btn ghost sm" type="button" id="labSkip">先回到練習</button>';
-    on("#labDone",function(){stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(!r.ok&&!r.dup)return;lab=null;screen="practice";route();});
+    on("#labDone",function(){if(!ready(false))return;stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(!(r.ok||r.dup)||r.storageStatus!=="ok")return;lab=null;screen="practice";route();});
     on("#labSkip",function(){stopAnim();lab=null;screen="practice";route();});
   }else{
     nav.innerHTML='<button class="btn" type="button" id="labDone"'+(all?'':' disabled')+'>'+(all?'完成了':'每一步都看過後按這裡')+'</button><button class="btn ghost sm" type="button" id="labHome">回首頁</button>';
-    on("#labDone",function(){stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(!r.ok&&!r.dup)return;lab=null;
+    on("#labDone",function(){if(!ready(false))return;stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(!(r.ok||r.dup)||r.storageStatus!=="ok")return;lab=null;
       $("#main").innerHTML='<div class="done"><b class="t">看完了</b><p class="muted" style="margin:0">把解說看懂了，再回去練卡片或考考爸媽。</p><div class="row" style="justify-content:center"><button class="btn ghost" type="button" id="back3">回首頁</button></div></div>';on("#back3",renderHome);renderSide();});
     on("#labHome",function(){stopAnim();lab=null;renderHome();});
   }

@@ -785,23 +785,32 @@
     }
     // 補充設計 C3：切回分頁與「再存一次」共同的恢復流程——查當下存檔 → 補存既有待存 → tick；每一步失敗就停，回傳該步的結果。
     // 只有整條都成功（storageStatus＝ok）畫面才可以公布或前進；acceptedIds＝這一輪確認存進去的操作 id。
-    function resume() {
+    function resume(action) {
+      // action（選填）＝畫面上還沒存進去的這一次操作（例如核心另有待存時遇到 READ 的作答）：
+      // 依序補存核心的待存操作，再送這一次（同一操作 id，已存過就不再送），最後補 tick（第 3 輪：待存 ID 分離）
       if (st.stale) return changed();
       var f = refresh();
       if (f === "changed") return changed();
       if (f === "read") return readErr();
-      var acc = [], info = null;
+      var acc = [], infos = {}, info = null;
       if (st.pendingAction) {
         var pid = st.pendingAction.id, r = dispatch(st.pendingAction);
         if (!r.ok && !(r.error && st.pendingAction === null && r.storageStatus !== "stale")) return r;   // 儲存類失敗就停；業務錯誤（已丟棄）繼續
-        if (r.ok && st.state.ops.indexOf(pid) >= 0) acc.push(pid);
-        info = r.info || null;
+        if (r.ok && st.state.ops.indexOf(pid) >= 0) { acc.push(pid); infos[pid] = r.info || {}; info = r.info || null; }
+      }
+      if (action && action.id) {
+        if (st.state.ops.indexOf(action.id) < 0) {
+          var ra = dispatch(action);
+          if (!ra.ok) return ra;
+          infos[action.id] = ra.info || {}; info = ra.info || info;
+        }
+        if (st.state.ops.indexOf(action.id) >= 0 && acc.indexOf(action.id) < 0) acc.push(action.id);
       }
       if (!st.loadError) {                                           // 壞檔／只剩舊版時本來就不寫，不做 tick
         var t = dispatch({ type: "tick" });
         if (!t.ok) return t;
       }
-      return out({ ok: status() === "ok", acceptedIds: acc, info: info });
+      return out({ ok: status() === "ok", acceptedIds: acc, info: info, infos: infos });
     }
     // storage 事件、單獨查核時呼叫：事件只當通知，一律重讀當下原文比對。ok＝這次讀到了而且沒變；storageStatus 才表示整體是否可公布
     function check() {

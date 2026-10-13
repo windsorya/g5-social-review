@@ -1315,6 +1315,114 @@ def r14(browser, label, dev):
         ctx.close()
 
 
+# ---------------------------------------------------------------- 第 3 輪（四站共同）：待存 ID 分離、tick 未完成不前進、READ 時不先標答案
+def r27(browser, label, dev):
+    """R27：設定寫失敗成為待存 → 作答時讀不到（核心待存仍是設定）→ 恢復後再存一次：先補存設定、再存這一題（只存一次），公布回饋、提示清掉。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        start(B); l0 = log_len(B); sel = prep_answer(B)
+        snd0 = B.state()["settings"]["sound"]
+        B.ev("() => { window.__failSet = true; const s = document.querySelector('#snd'); s.value = s.value === 'off' ? '0' : 'off'; s.dispatchEvent(new Event('change')); window.__failSet = false; window.__failGet = true; }")
+        B.p.locator(sel).click()
+        held = B.has("#saveFail") and not B.ev(FB)
+        B.ev("() => { window.__failGet = false; }")
+        B.p.locator("#saveAgain").click()
+        s = B.state()
+        check(f"{label} R27 另一筆待存＋作答讀不到→再存一次：設定與這一題都存到（這一題只一次）、公布回饋、提示清掉",
+              held and log_len(B) == l0 + 1 and s["settings"]["sound"] != snd0 and B.ev(FB) and B.ev(CLEAN) and not B.errors,
+              {"held": held, "log": [l0, log_len(B)], "sound": [snd0, s["settings"]["sound"]], "clean": B.ev(CLEAN), "errors": B.errors})
+    finally:
+        ctx.close()
+
+
+def r28(browser, label, dev):
+    """R28：切回分頁時 tick 寫失敗（維護沒做完）→ 恢復後按下一步／完成鈕：先補完 tick 再前進，前進後沒有殘留「沒有存」。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        if not open_lab(B):
+            check(f"{label} R28 找得到實驗", False, "沒有"); return
+        predict(B); n = n_tasks(B)
+        B.ev("() => { window.__failSetV = 0; }"); B.ev(SYNC_VIS)
+        pre = B.has("#retrySave")
+        do_task(B, 0)
+        run = B.ev(LAST_RUN)
+        check(f"{label} R28 tick 沒做完時按下一步：先補完 tick 再存這一步、提示清掉", pre and run["tasksDone"] == [0] and not B.has("#retrySave") and not B.errors,
+              {"pre": pre, "run": run, "retry": B.has("#retrySave")})
+        for i in range(1, n):
+            do_task(B, i)
+        B.ev("() => { window.__failSetV = 0; }"); B.ev(SYNC_VIS)
+        pre2 = B.has("#retrySave")
+        B.p.locator("#labDone").click()
+        done = not B.has("#labNav") and not B.has("#retrySave")
+        check(f"{label} R28 tick 沒做完時按完成鈕：先補完 tick 再完成、提示清掉", pre2 and done and not B.errors, {"pre": pre2, "labNav": B.has("#labNav"), "retry": B.has("#retrySave"), "errors": B.errors})
+    finally:
+        ctx.close()
+
+
+def r29(browser, label, dev):
+    """R29：題目畫面切回分頁時 tick 寫失敗 → 恢復後作答：先補完 tick 再公布答案，公布時沒有殘留「沒有存」。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        start(B); l0 = log_len(B)
+        B.ev("() => { window.__failSetV = 0; }"); B.ev(SYNC_VIS)
+        pre = B.has("#retrySave")
+        answer(B)
+        check(f"{label} R29 tick 沒做完時作答：先補完 tick 再公布、提示清掉、只記一次", pre and B.ev(FB) and B.ev(CLEAN) and log_len(B) == l0 + 1 and not B.errors,
+              {"pre": pre, "clean": B.ev(CLEAN), "log": [l0, log_len(B)], "errors": B.errors})
+    finally:
+        ctx.close()
+
+
+def r30(browser, label, dev):
+    """R30：讀不到時點選項：存檔確認前不標出正解／錯解；恢復後再存一次才標示。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        start(B)
+        for _ in range(30):
+            if B.has("#main .opt"):
+                break
+            answer(B)
+            if B.has("#next"):
+                B.p.locator("#next").click()
+            else:
+                start(B)
+        if not B.has("#main .opt"):
+            print(f"SKIP {label} R30 這一輪沒有選擇題"); return
+        B.ev("() => { window.__failGet = true; }")
+        B.p.locator("#main .opt").first.click()
+        marked = B.ev("document.querySelectorAll('#main .opt.right, #main .opt.wrong').length")
+        B.ev("() => { window.__failGet = false; }")
+        B.p.locator("#saveAgain").click()
+        after = B.ev("document.querySelectorAll('#main .opt.right').length")
+        check(f"{label} R30 讀不到時點選項：確認存好前不標正解；存好後才標", marked == 0 and after == 1 and B.ev(FB) and not B.errors, {"未存時標了": marked, "存好後正解": after, "errors": B.errors})
+    finally:
+        ctx.close()
+
+
+def r31(browser, label, dev):
+    """R31：實驗最後一步寫入失敗 → 恢復後切回分頁：留在實驗、重繪任務、完成鈕依 tasksDone 變成可按。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        if not open_lab(B):
+            check(f"{label} R31 找得到實驗", False, "沒有"); return
+        predict(B); n = n_tasks(B)
+        for i in range(n - 1):
+            do_task(B, i)
+        B.ev("() => { window.__failSet = true; }"); do_task(B, n - 1); B.ev("() => { window.__failSet = false; }")
+        B.ev("() => document.dispatchEvent(new Event('visibilitychange'))")
+        run = B.ev(LAST_RUN)
+        ok = B.has("#labPredict") and run["tasksDone"] == list(range(n)) and B.p.locator("#labDone").is_enabled() and B.p.locator("#labTask .ck.got").count() == n
+        check(f"{label} R31 實驗補存後切回分頁：留在實驗、任務全打勾、完成鈕可按", ok and not B.errors,
+              {"run": run, "got": B.p.locator("#labTask .ck.got").count(), "enabled": B.has("#labDone") and B.p.locator("#labDone").is_enabled(), "errors": B.errors})
+    finally:
+        ctx.close()
+
+
 FLOWS = [
     ("T01", t01, ()), ("T02", t02, ()), ("T03", t03, ()), ("T04", t04, ()),
     ("T05", t05, ("removeItem",)), ("T05", t05, ("clear",)), ("T06", t06, ()),
@@ -1331,6 +1439,7 @@ FLOWS = [
     ("T27", t27, ("未變",)), ("T27", t27, ("已刪",)), ("T28", t28, ()), ("T29", t29, ()),
     ("R01", r01, ()), ("R02", r02, ()), ("R03", r03, ()), ("R04", r04, ("同日",)), ("R04", r04, ("跨日",)), ("R05", r05, ()),
     ("R13", r13, ()), ("R14", r14, ()),
+    ("R27", r27, ()), ("R28", r28, ()), ("R29", r29, ()), ("R30", r30, ()), ("R31", r31, ()),
 ]
 
 
