@@ -406,16 +406,12 @@ def flow_upload(browser, subject, site, bank_global):
     check(f"補題區 upload.js 載不到：說明可以關掉再打開重試", "關掉再打開" in pg.inner_text("#g5upload"))
     mode["fail_js"] = False
     pg.locator("#upBox summary").click(); pg.locator("#upBox summary").click()
-    pg.wait_for_selector("#g5upload .g5u-unit", timeout=20000)
-    units = pg.evaluate(f"Object.keys(window.{bank_global}.UNITS).length")
-    check(f"補題區 重開後掛上元件、單元選單＝本站 {units} 個單元＋不分單元", pg.locator("#g5upload .g5u-unit option").count() == units + 1)
-    pg.set_input_files("#g5upload .g5u-file", files=[{"name": "p.png", "mimeType": "image/png", "buffer": UP_PNG}])
-    pg.fill("#g5upload .g5u-note", "習作第 3 頁")
-    pg.locator("#g5upload .g5u-send").click()
-    pg.wait_for_function("document.querySelector('#g5upload .g5u-out').textContent.indexOf('送出了') >= 0", timeout=15000)
-    ups = [r for r in sent if r.get("op") == "upload"]
-    first_unit = pg.evaluate(f"Object.keys(window.{bank_global}.UNITS)[0]")
-    check(f"補題區 送出：科目＝{subject}、說明前綴【補題:{subject}:{first_unit}】", len(ups) == 1 and ups[0]["subject"] == subject and ups[0]["note"] == f"【補題:{subject}:{first_unit}】習作第 3 頁", ups[:1] and {k: ups[0][k] for k in ("subject", "note")})
+    # 補題區已關功能（g5-help upload.js ENABLED=false，迴圈 L20261013134831-7db82f 會診後第 2 次 FAIL）：只顯示暫停說明、導向難題站、0 請求
+    pg.wait_for_function("document.getElementById('g5upload').textContent.indexOf('補題區暫停使用') >= 0", timeout=20000)
+    check(f"補題區 暫停：說明＋難題站連結、沒有表單", pg.locator("#g5upload a[href='https://windsorya.github.io/g5-help/']").count() == 1 and pg.locator("#g5upload .g5u-send, #g5upload .g5u-file").count() == 0)
+    pg.wait_for_timeout(500)
+    up_ops = [r for r in sent if r.get("op") in ("upload", "mine", "withdraw")]   # 本站同步自己的 op:get 不算補題區
+    check(f"補題區 暫停：補題區沒有送出任何請求（upload／mine／withdraw＝0）", not up_ops, up_ops[:2])
     check(f"補題區 沒有水平捲動", no_overflow(pg))
     # 做好了的連結 #c/<觀念id> 直接打開那個觀念；不存在的觀念留在首頁
     cid = pg.evaluate(f"Object.keys(window.{bank_global}.CONCEPTS)[0]")
