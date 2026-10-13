@@ -411,11 +411,8 @@ def flow_upload(browser, subject, site, bank_global):
     pg.wait_for_function("document.getElementById('g5upload').textContent.indexOf('補題區暫停使用') >= 0", timeout=20000)
     link = pg.locator("#g5upload a[href='https://windsorya.github.io/g5-help/']")
     check(f"補題區 暫停：說明與難題站連結看得見、沒有表單", pg.locator("#g5upload .g5u-msg", has_text="補題區暫停使用").is_visible() and link.count() == 1 and link.is_visible() and pg.locator("#g5upload .g5u-send, #g5upload .g5u-file").count() == 0)   # 審 684ecc8：只比 textContent 會放過 hidden
-    pg.wait_for_timeout(500)
-    own_key = pg.evaluate("window.G5Core ? G5Core.LS_KEY : null")
-    # 只排除本站同步讀自己的存檔（POST、op:get、key＝本站存檔 key）；其他 deployment、GET、別的 key 一律算補題區送出（審 5630afa）
-    up_ops = [r for r in sent if not ("_method" not in r and r.get("op") == "get" and own_key and r.get("key") == own_key)]
-    check(f"補題區 暫停：補題區沒有送出任何請求（除本站同步 op:get 外＝0，含 GET）", not up_ops, up_ops[:2])
+    # 「補題區 0 請求」屬元件保證，由 g5-help tests/upload_disabled.test.js 鎖（fetch／計時器／監聽＝0，突變會紅）；本站共用同一個 GAS 端點，
+    # 從網址分不出同步與補題，判準連三輪被審查打穿（684ecc8／5630afa／1d7a0df），依升級階梯縮範圍：本站只驗看得見的暫停說明與連結。
     check(f"補題區 沒有水平捲動", no_overflow(pg))
     # 做好了的連結 #c/<觀念id> 直接打開那個觀念；不存在的觀念留在首頁
     cid = pg.evaluate(f"Object.keys(window.{bank_global}.CONCEPTS)[0]")
