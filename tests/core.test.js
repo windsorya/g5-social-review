@@ -831,14 +831,14 @@ function flakyStorage() {
            setItem: (k, v) => { if (writeFail) throw new Error("QuotaExceeded"); m[k] = v; }, removeItem: (k) => { delete m[k]; },
            setRead: (f) => { readFail = f; }, setWrite: (f) => { writeFail = f; }, raw: m };
 }
-test("M4 已有待存操作 A，讀取又失敗時送出 B：回 SAVE_PENDING、待存仍是 A；恢復後重試 A 成功、再送 B 成功", () => {
+test("M4 已有待存操作 A，讀取又失敗時送出 B：回 READ（補充設計 C2 校正，原期待 SAVE_PENDING 掩蓋了讀取失敗）、待存仍是 A；恢復後重試 A 成功、再送 B 成功", () => {
   const b = bank(["s1", "s2"]); const mem = flakyStorage();
   const S = C.createStore({ storage: mem, bank: b, clock: () => NOON(D) }); S.load();
   const A = op("answer", { cardId: "s1", ok: true }), B = op("answer", { cardId: "s2", ok: true });
   mem.setWrite(true); assert.equal(S.dispatch(A).ok, false); mem.setWrite(false);
   mem.setRead(true);
   const r = S.dispatch(B);
-  assert.equal(r.error, "SAVE_PENDING"); assert.equal(S.get().pendingAction.id, A.id);
+  assert.equal(r.error, "READ"); assert.equal(r.pendingId, A.id); assert.equal(S.get().pendingAction.id, A.id);
   mem.setRead(false);
   assert.ok(S.retry().ok); assert.ok(S.accepted(A.id));
   assert.ok(S.dispatch(B).ok); assert.ok(S.accepted(B.id));

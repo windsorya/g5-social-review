@@ -130,6 +130,7 @@ function disk2(init) {
       const f = faults[i];
       if (f.op !== op || (f.key !== undefined && f.key !== k)) continue;
       if (f.after && seen.slice(0, -1).indexOf(f.after) < 0) continue;
+      if (f.skip) { f.skip--; continue; }                      // 同一操作＋key 先放行 skip 次（定位到流程中的第幾次讀寫）
       if (f.once) faults.splice(i, 1);
       throw new Error(op === "get" ? "SecurityError" : "QuotaExceededError");
     }
@@ -260,7 +261,7 @@ test("T22 自然站：家長選恢復——V 寫入失敗／V 寫後回讀失敗
   // (b) V 寫後回讀失敗一次
   mem = disk2({ [O]: V1 }); st = open2(mem, b, null); mem.fail("get", C.LS_KEY, { once: true, after: "set:" + C.LS_KEY });
   r = st.restoreLegacy("restore");
-  assert.equal(r.ok, false); assert.equal(r.error, "UNCONFIRMED");
+  assert.equal(r.ok, false); assert.equal(r.error, "READ"); assert.equal(r.writeOutcome, "unconfirmed"); assert.equal(r.choiceLocked, true);   // 補充設計 C4：回讀失敗＝READ＋未確認
   assert.ok(restored(mem), "結果未確認時刪了 V"); assert.equal(mem.raw[O], V1, "結果未確認時刪了 O"); assert.equal(st.get().loadError, "LEGACY");
   const m0 = mem.muts();
   r = st.restoreLegacy("restore");
@@ -519,8 +520,9 @@ test("T14b 開頁後讀取拋錯：不當空白、不失效重載；待存留著
   mem.f.read = true;
   const a = op("answer", { cardId: "s2", ok: true });
   const r = B.dispatch(a);
-  assert.equal(r.error, "SAVE_FAILED"); assert.equal(B.get().stale, false); assert.equal(B.get().pendingAction.id, a.id);
-  assert.equal(B.retry().ok, false); assert.equal(B.check().error, "READ");
+  // 補充設計 C2：讀不到就回 READ（原本期待 SAVE_FAILED 是錯誤契約，已校正）
+  assert.equal(r.error, "READ"); assert.equal(r.storageStatus, "readFailed"); assert.equal(B.get().stale, false); assert.equal(B.get().pendingAction.id, a.id);
+  assert.equal(B.retry().ok, false); assert.equal(B.retry().error, "READ"); assert.equal(B.check().error, "READ");
   assert.deepEqual(cards({ raw: mem.raw }), ["s1"]);
   mem.f.read = false;
   assert.ok(B.retry().ok); assert.ok(B.accepted(a.id)); assert.deepEqual(cards(mem), ["s1", "s2"]);
@@ -555,4 +557,244 @@ test("T16【已知限制，不修】兩個 store 讀到同一份舊原文後交�
   assert.deepEqual(cards(mem), ["s2"], "已知限制：A 的 s1 被 B 蓋掉（讀與寫之間交錯，非原子）");
   assert.ok(isChanged(A.dispatch({ type: "tick" })), "交錯之後 A 下一次操作仍會發現存檔變了（但 s1 已經遺失）");
   void B;
+});
+
+/* ---------- 補充設計 task-mv6ujb6v-51m58n（docs/design-storage-resume-20261013.md）：單一存檔狀態 storageStatus＋共同 resume() ----------
+   補充矩陣編號以 R 開頭（R01＝補充 T01），避免和原設計 T01–T33 混淆。故障一律以「操作＋key＋第幾次」定位（disk2 的 skip），不靠全域讀取次數。 */
+const RESUME_SHA = "0c4586ff0fe28e4020fe3c4f0cbae37279c73ac1b8ba533f83759e774fa0b3fc";   // docs/design-storage-resume-20261013.md（補充設計全文）
+const SS = (r) => r && r.storageStatus;
+function okStore(b, init) { const mem = disk2(init); const st = open2(mem, b, sess()); return { mem, st }; }
+
+test("R09 讀取失敗一律回 READ（C2）：dispatch 直接讀失敗／既有待存在補寫時讀失敗／retry 有無待存——待存 id 不被新操作取代、零寫入", () => {
+  const b = bank(["s1", "s2"]);
+  // dispatch 直接讀失敗：回 READ、這筆留成待存
+  let { mem, st } = okStore(b); const a = op("answer", { cardId: "s1", ok: true });
+  mem.fail("get", C.LS_KEY, { once: true });
+  let r = st.dispatch(a);
+  assert.deepEqual([r.ok, r.error, SS(r), r.pendingId], [false, "READ", "readFailed", a.id]); assert.equal(mem.muts(), 0);
+  assert.equal(st.get().storageStatus, "readFailed");
+  // 既有待存 A 補寫時讀失敗，再送 B：回 READ（不是 SAVE_PENDING／SAVE_FAILED），待存仍是 A
+  ({ mem, st } = okStore(b)); const A1 = op("answer", { cardId: "s1", ok: true }), B1 = op("answer", { cardId: "s2", ok: true });
+  mem.fail("set", C.LS_KEY, { once: true }); assert.equal(st.dispatch(A1).error, "SAVE_FAILED"); assert.equal(st.get().storageStatus, "saveFailed");
+  const m0 = mem.muts(); mem.fail("get", C.LS_KEY, { once: true });
+  r = st.dispatch(B1);
+  assert.deepEqual([r.ok, r.error, SS(r), r.pendingId], [false, "READ", "readFailed", A1.id]); assert.equal(mem.muts(), m0);
+  // retry 有待存讀失敗／無待存讀失敗
+  mem.fail("get", C.LS_KEY, { once: true }); r = st.retry();
+  assert.deepEqual([r.ok, r.error, SS(r), r.pendingId], [false, "READ", "readFailed", A1.id]); assert.equal(mem.muts(), m0);
+  assert.ok(st.retry().ok); assert.ok(st.accepted(A1.id)); assert.equal(st.get().storageStatus, "ok");
+  mem.fail("get", C.LS_KEY, { once: true }); r = st.retry();
+  assert.deepEqual([r.ok, r.error, SS(r)], [false, "READ", "readFailed"]);
+});
+
+test("R10 真正寫入失敗後單獨 check() 成功不清「沒存」；無 id 的 tick 寫失敗也留「維護未完成」；resume 成功才解除", () => {
+  const b = bank(["s1"]); let { mem, st } = okStore(b); const a = op("answer", { cardId: "s1", ok: true });
+  mem.fail("set", C.LS_KEY, { once: true }); st.dispatch(a);
+  let c = st.check(); assert.equal(c.ok, true); assert.equal(SS(c), "saveFailed", "check 讀成功不能清掉待存");
+  assert.equal(st.get().pendingAction.id, a.id);
+  let r = st.resume(); assert.ok(r.ok); assert.equal(SS(r), "ok"); assert.ok(st.accepted(a.id));
+  ({ mem, st } = okStore(b));
+  mem.fail("set", C.LS_KEY, { once: true }); r = st.dispatch({ type: "tick" });
+  assert.deepEqual([r.ok, r.error, SS(r)], [false, "SAVE_FAILED", "saveFailed"]);
+  assert.equal(SS(st.check()), "saveFailed", "tick 沒做完也是未完成");
+  r = st.resume(); assert.ok(r.ok); assert.equal(SS(r), "ok");
+});
+
+test("R03 答案寫失敗→設定操作補存了答案、但設定自己寫失敗→retry 讀失敗：回 READ、待存是設定、零寫入、答案已存但這輪不公布", () => {
+  const b = bank(["s1"]); const { mem, st } = okStore(b);
+  const ans = op("answer", { cardId: "s1", ok: true }), set = op("settings", { sound: false });
+  mem.fail("set", C.LS_KEY, { once: true }); st.dispatch(ans);
+  mem.fail("set", C.LS_KEY, { once: true, skip: 1 });          // 補寫答案成功，接著設定那次寫入失敗
+  const rs = st.dispatch(set);
+  assert.equal(rs.ok, false); assert.equal(st.accepted(ans.id), true); assert.equal(st.get().pendingAction.id, set.id);
+  const m0 = mem.muts(); mem.fail("get", C.LS_KEY, { once: true });
+  const r = st.retry();
+  assert.deepEqual([r.ok, r.error, SS(r), r.pendingId], [false, "READ", "readFailed", set.id]); assert.equal(mem.muts(), m0);
+  const r2 = st.resume(); assert.ok(r2.ok); assert.equal(SS(r2), "ok"); assert.ok(st.accepted(set.id));
+});
+
+test("R04／R05 resume：前置檢查成功、tick 讀 V 失敗——回 READ、不算成功；待存答案已補存的不回滾，下次 resume 同 id 不重複", () => {
+  const b = bank(["s1"]);
+  let { mem, st } = okStore(b);
+  assert.ok(st.dispatch(op("answer", { cardId: "s1", ok: true })).ok);
+  const v0 = mem.raw[C.LS_KEY];
+  mem.fail("get", C.LS_KEY, { once: true, skip: 1 });          // resume 自己的前置讀取成功，tick 那次讀失敗
+  let r = st.resume();
+  assert.deepEqual([r.ok, r.error, SS(r)], [false, "READ", "readFailed"]); assert.equal(mem.raw[C.LS_KEY], v0);
+  // R05：待存答案在 resume 中補存成功，後面的 tick 讀失敗
+  ({ mem, st } = okStore(b)); const a = op("answer", { cardId: "s1", ok: true });
+  mem.fail("set", C.LS_KEY, { once: true }); st.dispatch(a);
+  mem.fail("get", C.LS_KEY, { once: true, skip: 2 });          // 前置讀、補寫前讀都成功；tick 讀失敗
+  r = st.resume();
+  assert.deepEqual([r.ok, r.error, SS(r)], [false, "READ", "readFailed"]);
+  assert.equal(st.accepted(a.id), true, "已補存的答案被回滾"); assert.equal(JSON.parse(mem.raw[C.LS_KEY]).log.length, 1);
+  r = st.resume(); assert.ok(r.ok); assert.equal(SS(r), "ok");
+  assert.equal(JSON.parse(mem.raw[C.LS_KEY]).log.length, 1, "同一題記了兩次"); assert.ok(r.state.ops.indexOf(a.id) >= 0);
+});
+
+test("R06 READ 解除後：V 沒變才續接；被換掉或刪掉＝失效，舊待存不覆寫外部資料", () => {
+  const b = bank(["s1", "s2"]);
+  for (const how of ["沒變", "換掉", "刪掉"]) {
+    const { mem, st } = okStore(b); assert.ok(st.dispatch(op("answer", { cardId: "s1", ok: true })).ok);
+    const a = op("answer", { cardId: "s2", ok: true });
+    mem.fail("get", C.LS_KEY, { once: true }); assert.equal(st.dispatch(a).error, "READ");
+    if (how === "換掉") { const o = JSON.parse(mem.raw[C.LS_KEY]); o.settings.sound = !o.settings.sound; mem.raw[C.LS_KEY] = JSON.stringify(o); }
+    if (how === "刪掉") delete mem.raw[C.LS_KEY];
+    const before = mem.raw[C.LS_KEY], m0 = mem.muts();
+    const r = st.resume();
+    if (how === "沒變") { assert.ok(r.ok, how); assert.ok(st.accepted(a.id)); }
+    else { assert.deepEqual([r.ok, r.error, SS(r)], [false, "STATE_CHANGED", "stale"], how); assert.equal(mem.muts(), m0, how); assert.equal(mem.raw[C.LS_KEY], before, how); }
+  }
+});
+
+test("R11 失效後連點重試、重複通知：零寫入、狀態一直是 stale，同一 store 不會自己回 ok", () => {
+  const b = bank(["s1"]); const { mem, st } = okStore(b); assert.ok(st.dispatch(op("answer", { cardId: "s1", ok: true })).ok);
+  delete mem.raw[C.LS_KEY]; const m0 = mem.muts();
+  for (let i = 0; i < 3; i++) { assert.equal(SS(st.resume()), "stale"); assert.equal(SS(st.retry()), "stale"); assert.equal(SS(st.check()), "stale"); }
+  assert.equal(st.get().storageStatus, "stale"); assert.equal(mem.muts(), m0);
+});
+
+test("R22 本站 docs/ 有兩份設計全文（原設計＋補充設計），受 Git 追蹤、內容與四站一致（SHA-256）、不是連結", () => {
+  const fs = require("fs"), path = require("path"), cp = require("child_process"), crypto = require("crypto");
+  const root = path.join(__dirname, "..");
+  const want = { "docs/design-storage-base-20261013.md": "46f8cca9d044122a01b8244228018c0e2634566c8cb9d36dbcc0fd16ad6b4c73",
+                 "docs/design-storage-resume-20261013.md": RESUME_SHA };
+  for (const [f, sha] of Object.entries(want)) {
+    const p = path.join(root, f);
+    assert.ok(fs.existsSync(p), f + " 不存在"); assert.equal(fs.lstatSync(p).isSymbolicLink(), false, f + " 是連結");
+    assert.equal(crypto.createHash("sha256").update(fs.readFileSync(p)).digest("hex"), sha, f + " 內容和其他站不一致");
+    assert.equal(cp.execFileSync("git", ["ls-files", "--error-unmatch", f], { cwd: root }).toString().trim(), f, f + " 沒有受 Git 追蹤");
+  }
+});
+
+test("R25 交付產物與來源一致：依 build.py 的組裝規則在記憶體重建，與 index.html 逐字相同（自然站另核 v3/index.html）", () => {
+  const fs = require("fs"), path = require("path"); const root = path.join(__dirname, "..");
+  const body = fs.readFileSync(path.join(root, "src/app.html"), "utf8").replace(/<!--@INLINE (src\/[A-Za-z0-9_.-]+\.js)-->/g,
+    (m, f) => "<script>\n" + fs.readFileSync(path.join(root, f), "utf8") + "\n</script>");
+  const idx = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  assert.ok(idx.endsWith(body + "</body></html>"), "index.html 不是由目前的 src 建出來的");
+  if (fs.existsSync(path.join(root, "v3/index.html"))) assert.equal(fs.readFileSync(path.join(root, "v3/index.html"), "utf8"), idx, "v3/index.html 與 index.html 不同");
+});
+
+/* ---------- 自然站（C4／C5）：家長選擇每次重驗 V/O/A、首次選擇綁定候選、封存 pending 由現況解除 ---------- */
+test("R12 自然站：開頁只有 O，按恢復前出現不同的 A——以當下內容判衝突：V/O/A 都不動、不公布恢復", { skip: !SCI && NO_LEGACY }, () => {
+  const b = bank(["s1"]); const other = JSON.stringify({ v: 1, cards: {} });
+  const mem = disk2({ [O]: V1 }); const st = open2(mem, b, null);
+  assert.equal(st.get().legacy.conflict, false);
+  mem.raw[A] = other;
+  const r = st.restoreLegacy("restore");
+  assert.deepEqual([r.ok, r.error], [false, "CONFLICT"]); assert.equal(mem.muts(), 0);
+  assert.equal(mem.raw[C.LS_KEY], undefined); assert.equal(mem.raw[O], V1); assert.equal(mem.raw[A], other);
+  assert.equal(st.get().legacy.conflict, true, "畫面要改成衝突");
+});
+
+test("R13 自然站：衝突（開頁就有／選項顯示後才出現）時按「從頭開始」也不建立 V、不覆蓋或刪舊資料", { skip: !SCI && NO_LEGACY }, () => {
+  const b = bank(["s1"]); const other = JSON.stringify({ v: 1, cards: {} });
+  for (const when of ["開頁就有", "之後才出現"]) {
+    const mem = disk2(when === "開頁就有" ? { [O]: V1, [A]: other } : { [O]: V1 }); const st = open2(mem, b, null);
+    if (when !== "開頁就有") mem.raw[A] = other;
+    const r = st.restoreLegacy("fresh");
+    assert.deepEqual([r.ok, r.error], [false, "CONFLICT"], when); assert.equal(mem.muts(), 0, when);
+    assert.equal(mem.raw[C.LS_KEY], undefined, when); assert.equal(mem.raw[O], V1); assert.equal(mem.raw[A], other);
+  }
+});
+
+for (const [first, second] of [["fresh", "restore"], ["restore", "fresh"]]) {
+  test("R14／R15 自然站：先選 " + first + "、V 寫後回讀失敗，再按 " + second + "：回 READ＋選項鎖定；重查後只能公布 " + first + "，實際 V 也是 " + first, { skip: !SCI && NO_LEGACY }, () => {
+    const b = bank(["s1"]); const mem = disk2({ [O]: V1 }); const st = open2(mem, b, null);
+    mem.fail("get", C.LS_KEY, { once: true, after: "set:" + C.LS_KEY });
+    let r = st.restoreLegacy(first);
+    assert.deepEqual([r.ok, r.error, r.writeOutcome, r.choiceLocked], [false, "READ", "unconfirmed", true]);
+    assert.equal(mem.raw[O], V1, "未確認就刪了 O");
+    const m0 = mem.muts();
+    r = st.restoreLegacy(second);
+    assert.deepEqual([r.ok, r.error, r.choiceLocked], [false, "CHOICE_LOCKED", true]); assert.equal(mem.muts(), m0, "鎖定時還寫了");
+    r = st.restoreLegacy("recheck");
+    assert.ok(r.ok); assert.equal(r.appliedChoice, first); assert.equal(st.get().migrated, first === "restore");
+    const cardsNow = Object.keys(JSON.parse(mem.raw[C.LS_KEY]).cards);
+    assert.deepEqual(cardsNow, first === "restore" ? ["s1"] : [], "實際 V 與公布的選擇不同");
+    assert.equal(mem.raw[A], V1); assert.equal(mem.raw[O], undefined);
+  });
+}
+
+test("R16 自然站：未確認時重新檢查——V 不存在才解鎖、等於候選才承認首次選擇、被換成不同或壞資料就停（失效），不猜、不覆蓋", { skip: !SCI && NO_LEGACY }, () => {
+  const b = bank(["s1"]);
+  for (const how of ["不存在", "等於候選", "不同", "壞資料"]) {
+    const mem = disk2({ [O]: V1 }); const st = open2(mem, b, null);
+    mem.fail("get", C.LS_KEY, { once: true, after: "set:" + C.LS_KEY });
+    assert.equal(st.restoreLegacy("restore").error, "READ");
+    if (how === "不存在") delete mem.raw[C.LS_KEY];
+    if (how === "不同") mem.raw[C.LS_KEY] = JSON.stringify(C.blankState());
+    if (how === "壞資料") mem.raw[C.LS_KEY] = "{壞";
+    const before = mem.raw[C.LS_KEY];
+    const r = st.restoreLegacy("recheck");
+    if (how === "不存在") { assert.deepEqual([r.ok, r.choiceLocked], [false, false], how); assert.equal(st.restoreLegacy("fresh").ok, true, how + "：解鎖後應可重新選擇"); }
+    else if (how === "等於候選") { assert.ok(r.ok, how); assert.equal(r.appliedChoice, "restore"); }
+    else { assert.deepEqual([r.ok, r.error], [false, "STATE_CHANGED"], how); assert.equal(mem.raw[C.LS_KEY], before, how + "：覆蓋了"); assert.equal(mem.raw[O], V1, how); }
+  }
+});
+
+test("R17 自然站：選項、確認、取消、重查、封存重試各入口都重讀 V/O/A；讀失敗時不寫不刪、不切換選擇、不公布成功", { skip: !SCI && NO_LEGACY }, () => {
+  const b = bank(["s1"]);
+  for (const key of [C.LS_KEY, O, A]) for (const choice of ["recheck", "restore", "fresh"]) {
+    const mem = disk2({ [O]: V1 }); const st = open2(mem, b, null);
+    mem.fail("get", key, { once: true });
+    const r = st.restoreLegacy(choice);
+    assert.deepEqual([r.ok, r.error, SS(r)], [false, "READ", "readFailed"], key + " " + choice); assert.equal(mem.muts(), 0, key + " " + choice);
+    assert.equal(st.get().loadError, "LEGACY"); assert.equal(st.restoreLegacy(choice === "fresh" ? "restore" : "fresh").error === "CHOICE_LOCKED", false, "讀失敗不該鎖定選擇");
+  }
+  // 封存重試入口
+  const v3 = JSON.stringify(C.blankState()); const mem = disk2({ [C.LS_KEY]: v3, [O]: V1 }); mem.fail("set", A, { once: true });
+  const st = open2(mem, b, null); assert.equal(st.get().archive, "pending");
+  for (const key of [C.LS_KEY, O, A]) {
+    mem.fail("get", key, { once: true }); const m0 = mem.muts();
+    const r = st.retryArchive(); assert.deepEqual([r.ok, r.error, SS(r)], [false, "READ", "readFailed"], key); assert.equal(mem.muts(), m0);
+  }
+});
+
+test("R18 自然站：只有合法 V、O/A 都不存在，載入讀 O 失敗一次：解除後 retryArchive 回 none 並清掉 pending，再試冪等", { skip: !SCI && NO_LEGACY }, () => {
+  const b = bank(["s1"]); const mem = disk2({ [C.LS_KEY]: JSON.stringify(C.blankState()) }); mem.fail("get", O, { once: true });
+  const st = open2(mem, b, null); assert.equal(st.get().archive, "pending");
+  for (let i = 0; i < 3; i++) { const r = st.retryArchive(); assert.ok(r.ok); assert.equal(r.archive, "none"); assert.equal(st.get().archive, "none"); }
+  assert.equal(mem.muts(), 0);
+});
+
+test("R19 自然站：刪 O 後回讀失敗；重試時 O 不存在，A 相同／缺失／不同：相同才 done；不重建 O、不刪 V", { skip: !SCI && NO_LEGACY }, () => {
+  const b = bank(["s1"]); const other = JSON.stringify({ v: 1, cards: {} });
+  for (const how of ["相同", "缺失", "不同"]) {
+    const mem = disk2({ [O]: V1 }); const st = open2(mem, b, null);
+    mem.fail("get", O, { once: true, after: "rm:" + O });
+    const r = st.restoreLegacy("restore"); assert.ok(r.ok); assert.equal(r.archive, "pending");
+    const v = mem.raw[C.LS_KEY];
+    if (how === "缺失") delete mem.raw[A]; if (how === "不同") mem.raw[A] = other;
+    const r2 = st.retryArchive();
+    if (how === "相同") { assert.ok(r2.ok); assert.equal(r2.archive, "done"); }
+    else { assert.equal(r2.ok, false, how); assert.notEqual(r2.archive, "done", how); }
+    assert.equal(mem.raw[O], undefined, how + "：重建了 O"); assert.equal(mem.raw[C.LS_KEY], v, how + "：動了 V");
+  }
+});
+
+test("R20 自然站：V 寫、A 寫、A 回讀、O 刪各單次失敗：已存 V 與尚存原文保留、錯誤類別正確、成功文案依實際結果、封存未完明示", { skip: !SCI && NO_LEGACY }, () => {
+  const b = bank(["s1"]);
+  const cases = [["V 寫", ["set", C.LS_KEY, {}], "SAVE_FAILED"], ["A 寫", ["set", A, {}], null], ["A 回讀", ["get", A, { after: "set:" + A }], null], ["O 刪", ["rm", O, {}], null]];
+  for (const [how, f, err] of cases) {
+    const mem = disk2({ [O]: V1 }); const st = open2(mem, b, null); mem.fail(f[0], f[1], Object.assign({ once: true }, f[2]));
+    const r = st.restoreLegacy("restore");
+    if (err) { assert.deepEqual([r.ok, r.error, SS(r)], [false, err, "saveFailed"], how); assert.equal(mem.raw[C.LS_KEY], undefined); assert.equal(mem.raw[O], V1); continue; }
+    assert.ok(r.ok, how); assert.equal(r.appliedChoice, "restore"); assert.equal(r.archive, "pending", how); assert.ok(restored(mem), how);
+    assert.equal(mem.raw[O], V1, how + "：原文還沒安全封存就刪了 O");
+    const r2 = st.retryArchive(); assert.ok(r2.ok, how); assert.equal(r2.archive, "done"); assert.equal(mem.raw[A], V1); assert.equal(mem.raw[O], undefined);
+  }
+});
+
+test("R21 自然站：未確認後強制重開——V 在就照 V 載入、不猜先前選項；V 不在就重新等家長選擇、不自動恢復", { skip: !SCI && NO_LEGACY }, () => {
+  const b = bank(["s1"]);
+  for (const how of ["V 在", "V 不在"]) {
+    const mem = disk2({ [O]: V1 }); const st = open2(mem, b, null);
+    mem.fail("get", C.LS_KEY, { once: true, after: "set:" + C.LS_KEY }); assert.equal(st.restoreLegacy("restore").error, "READ");
+    if (how === "V 不在") delete mem.raw[C.LS_KEY];
+    const st2 = open2(mem, b, null);
+    if (how === "V 在") { assert.equal(st2.get().loadError, null); assert.equal(st2.get().migrated, false, "不能猜是恢復來的"); assert.deepEqual(keys(st2), ["s1"]); }
+    else { assert.equal(st2.get().loadError, "LEGACY"); assert.equal(mem.raw[C.LS_KEY], undefined); }
+  }
 });

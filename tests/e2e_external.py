@@ -35,10 +35,14 @@ INIT = """(() => { const S = Storage.prototype, set = S.setItem, get = S.getItem
     if (this === window.localStorage) {
       window.__keys.push(String(k));
       if (window.__failSet) throw new DOMException('QuotaExceededError', 'QuotaExceededError');
+      // 定位注入（補充設計：以操作＋key＋第幾次定位）：本站存檔先放行 __failSetV 次，下一次寫入失敗一次
+      if (window.G5Core && k === window.G5Core.LS_KEY && typeof window.__failSetV === 'number' && window.__failSetV >= 0) { if (window.__failSetV-- === 0) throw new DOMException('QuotaExceededError', 'QuotaExceededError'); }
       if (window.G5Core && k === window.G5Core.LS_KEY) window.__w++;
     }
     return set.call(this, k, v); };
-  S.getItem = function (k) { if (this === window.localStorage) { window.__keys.push(String(k)); if (window.__failGet) throw new DOMException('SecurityError', 'SecurityError'); } return get.call(this, k); };
+  S.getItem = function (k) { if (this === window.localStorage) { window.__keys.push(String(k)); if (window.__failGet) throw new DOMException('SecurityError', 'SecurityError');
+      if (window.G5Core && k === window.G5Core.LS_KEY && typeof window.__failGetV === 'number' && window.__failGetV >= 0) { if (window.__failGetV-- === 0) throw new DOMException('SecurityError', 'SecurityError'); } }
+    return get.call(this, k); };
   S.removeItem = function (k) { if (this === window.localStorage) { window.__keys.push(String(k)); if (window.__failRm) throw new DOMException('SecurityError', 'SecurityError'); } return rm.call(this, k); };
   const ss = S.setItem; S.setItem = function (k, v) { if (window.__failSession && this === window.sessionStorage) throw new DOMException('QuotaExceededError', 'QuotaExceededError'); return ss.call(this, k, v); };
   const raf = window.requestAnimationFrame; window.__raf = 0; window.requestAnimationFrame = function (f) { window.__raf++; return raf.call(window, f); };
@@ -86,11 +90,13 @@ ORIGIN = None
 class Tab:
     """一個分頁：記 pageerror、主框架導航次數（＝載入／重載次數）。"""
 
-    def __init__(self, ctx):
+    def __init__(self, ctx, clock=None):
         self.p = ctx.new_page()
         self.errors, self.navs = [], 0
         self.p.on("pageerror", lambda e: self.errors.append(str(e)))
         self.p.on("framenavigated", self._nav)
+        if clock:
+            self.p.clock.install(time=clock)   # 跨日流程用：頁面時鐘可控
         self.p.goto(ORIGIN + "/" + PAGE)
         self.ready()
 
@@ -885,7 +891,7 @@ def t15_anim(browser, label, dev):
 # 用 LS_KEY 認站（不用 LS_V1：舊碼三站的 LS_V1 是假 key）。站別專屬流程在別站印 SKIP。
 O_KEY, A_KEY = "g5sci.v1", "g5sci.v1.archived"
 V1 = '{"v":1,"cards":{},"unit3":true}'   # 恢復後 settings.unit3＝true（空白新版是 false），看得出是不是真的從舊版恢復
-READ_TXT = "暫時讀不到紀錄，請再試一次"
+READ_TXT = "暫時讀不到紀錄，先停在這裡，請再試一次"   # 補充設計 C1 文案
 
 
 def is_sci(t):
@@ -1017,8 +1023,8 @@ def t24(browser, label, dev):
         other = '{"v":1,"cards":{}}'
         seed(B, {O_KEY: V1, A_KEY: other})
         box = B.p.locator("#legacyBox").inner_text() if B.has("#legacyBox") else ""
-        check(f"{label} T24 A 與 O 不同：顯示封存衝突、沒有「恢復」鈕、三個 key 都不動",
-              "不一樣" in box and not B.has("#legacyRestore") and B.raw() is None and B.raw(O_KEY) == V1 and B.raw(A_KEY) == other and B.ev("window.__w") == 0 and not B.errors,
+        check(f"{label} T24 A 與 O 不同：顯示封存衝突、沒有「恢復」也沒有「從頭開始」（補充設計 C4）、三個 key 都不動",
+              "不一樣" in box and not B.has("#legacyRestore") and not B.has("#legacyFresh") and B.raw() is None and B.raw(O_KEY) == V1 and B.raw(A_KEY) == other and B.ev("window.__w") == 0 and not B.errors,
               {"box": box[:120], "O": B.raw(O_KEY), "A": B.raw(A_KEY), "errors": B.errors})
     finally:
         ctx.close()
@@ -1165,6 +1171,150 @@ def t29(browser, label, dev):
         ctx.close()
 
 
+# ---------------------------------------------------------------- 補充設計 task-mv6ujb6v-51m58n（單一存檔狀態＋resume）；R 編號＝補充矩陣 Txx
+FB = "() => !!(document.querySelector('#main .fb.ok') || document.querySelector('#errq') || document.querySelector('#next'))"
+CLEAN = "() => { const t = document.querySelector('#banners').innerText; return !/沒有存|讀不到|還沒存/.test(t) && !document.querySelector('#saveFail'); }"
+
+
+def r01(browser, label, dev):
+    """R01：答案寫入失敗 → 切回分頁時讀不到 → 解除 → 再存一次：只存一次、同輪公布回饋、提示一起更新（不殘留「沒有存」）。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        start(B); l0 = log_len(B); sel = prep_answer(B)
+        B.ev("() => { window.__failSet = true; }"); B.p.locator(sel).click(); B.ev("() => { window.__failSet = false; window.__failGet = true; }")
+        snap = B.ev(SYNC_VIS)
+        mid = B.has("#saveFail") and not B.ev(FB) and snap.get("read") == 1 and snap.get("dw") == 0
+        B.ev("() => { window.__failGet = false; }")
+        B.p.locator("#saveAgain").click()
+        check(f"{label} R01 寫失敗→切回分頁讀不到→解除→再存一次：只存一次、公布回饋、READ／沒存提示一起清掉",
+              mid and log_len(B) == l0 + 1 and B.ev(FB) and B.ev(CLEAN) and not B.errors, {"mid": mid, "snap": snap, "log": [l0, log_len(B)], "clean": B.ev(CLEAN), "errors": B.errors})
+    finally:
+        ctx.close()
+
+
+def r02(browser, label, dev):
+    """R02：作答時就讀不到 → 讀取仍失敗時切回分頁 → 恢復 → 再存一次：不以空白覆蓋、留原題、同 id 只接受一次、提示一致。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        start(B); l0 = log_len(B); raw0 = B.raw(); sel = prep_answer(B)
+        B.ev("() => { window.__failGet = true; }"); B.p.locator(sel).click()
+        snap = B.ev(SYNC_VIS)
+        held = B.has("#saveFail") and not B.ev(FB) and snap.get("dw") == 0 and B.raw() == raw0 and READ_TXT in B.p.locator("#banners").inner_text()
+        B.ev("() => { window.__failGet = false; }")
+        B.p.locator("#saveAgain").click()
+        s = B.state(); ops = s["ops"]
+        check(f"{label} R02 作答就讀不到→切回分頁仍讀不到→恢復→再存一次：失敗時留原題、恢復後同 id 只接受一次、提示一致",
+              held and log_len(B) == l0 + 1 and len(ops) == len(set(ops)) and B.ev(FB) and B.ev(CLEAN) and not B.errors,
+              {"held": held, "log": [l0, log_len(B)], "clean": B.ev(CLEAN), "errors": B.errors})
+    finally:
+        ctx.close()
+
+
+def r03(browser, label, dev):
+    """R03：答案寫失敗 → 設定操作補存了答案、但設定自己寫失敗 → 讀不到時按再存一次：不移除失敗提示、不公布答案；恢復後才公布。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        start(B); l0 = log_len(B); sel = prep_answer(B)
+        B.ev("() => { window.__failSet = true; }"); B.p.locator(sel).click(); B.ev("() => { window.__failSet = false; window.__failSetV = 1; }")
+        B.ev("() => { const s = document.querySelector('#snd'); s.value = s.value === 'off' ? '0' : 'off'; s.dispatchEvent(new Event('change')); }")
+        pre = log_len(B) == l0 + 1 and B.has("#saveFail")
+        B.ev("() => { window.__failGet = true; }")
+        snap = B.ev(SYNC_CLICK, "#saveAgain")
+        held = B.has("#saveFail") and not B.ev(FB) and snap.get("dw") == 0
+        B.ev("() => { window.__failGet = false; }")
+        B.p.locator("#saveAgain").click()
+        check(f"{label} R03 其他操作待存＋讀不到時按再存一次：不公布答案、零寫入；恢復後才公布、答案只記一次",
+              pre and held and B.ev(FB) and log_len(B) == l0 + 1 and B.ev(CLEAN) and not B.errors,
+              {"pre": pre, "held": held, "snap": snap, "log": [l0, log_len(B)], "errors": B.errors})
+    finally:
+        ctx.close()
+
+
+def r04(browser, label, dev, when):
+    """R04：實驗／解說進行中切回分頁，前置檢查成功、tick 讀存檔失敗（同日／跨日）：留在原畫面（lab、句數、runId 不變）、顯示讀不到。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx, clock="2026-10-20T23:59:00+08:00" if when == "跨日" else None)
+        if not open_lab(B):
+            check(f"{label} R04 找得到實驗", False, "沒有"); return
+        predict(B); do_task(B, 0)
+        run0 = B.ev(LAST_RUN); li0 = B.p.locator("#mSteps li").count()
+        if when == "跨日":
+            B.p.clock.set_system_time("2026-10-21T00:00:30+08:00")
+        B.ev("() => { window.__failGetV = 1; }")
+        snap = B.ev(SYNC_VIS)
+        still = B.has("#labPredict") and B.has("#labTask") and B.p.locator("#mSteps li").count() == li0 and B.ev(LAST_RUN) == run0
+        check(f"{label} R04 {when}切回分頁、tick 讀不到：留在原實驗畫面、零寫入、看得到「{READ_TXT}」",
+              still and snap.get("dw") == 0 and snap.get("read") == 1 and snap.get("overlay") == 0 and not B.errors,
+              {"still": still, "snap": snap, "errors": B.errors})
+        B.ev("() => document.dispatchEvent(new Event('visibilitychange'))")
+        check(f"{label} R04 {when}讀取恢復後再切回：提示消失、畫面照常", B.ev("document.querySelectorAll('#readNote').length") == 0 and not B.errors, B.errors)
+    finally:
+        ctx.close()
+
+
+def r05(browser, label, dev):
+    """R05：resume 中答案補存成功、後面的 tick 讀不到：已存不回滾、這輪不公布；再按一次才公布，同一題不記兩次。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        start(B); l0 = log_len(B); sel = prep_answer(B)
+        B.ev("() => { window.__failSet = true; }"); B.p.locator(sel).click(); B.ev("() => { window.__failSet = false; window.__failGetV = 2; }")
+        snap = B.ev(SYNC_CLICK, "#saveAgain")
+        held = log_len(B) == l0 + 1 and B.has("#saveFail") and not B.ev(FB) and snap.get("read") == 1
+        B.p.locator("#saveAgain").click()
+        check(f"{label} R05 補存成功但 tick 讀不到：答案已存、這輪不公布；再按一次才公布、只記一次",
+              held and B.ev(FB) and log_len(B) == l0 + 1 and B.ev(CLEAN) and not B.errors, {"held": held, "snap": snap, "log": [l0, log_len(B)], "errors": B.errors})
+    finally:
+        ctx.close()
+
+
+def r13(browser, label, dev):
+    """R13（自然）：開頁只有 O，選項顯示後才出現不同的 A；按「從頭開始」：當下重驗發現衝突，不建立 V、不動 O／A，兩個選項都收起來。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        if not is_sci(B):
+            print(f"SKIP {label} R13 本站沒有舊版存檔（設計 S0）"); return
+        other = '{"v":1,"cards":{}}'
+        seed(B, {O_KEY: V1})
+        B.ev("(v) => localStorage.setItem('g5sci.v1.archived', v)", other)   # 同頁直接寫，沒有 storage 事件
+        B.p.locator("#legacyFresh").click()
+        if B.has("#legacyYes"):
+            B.p.locator("#legacyYes").click()
+        box = B.p.locator("#legacyBox").inner_text() if B.has("#legacyBox") else ""
+        check(f"{label} R13 選項顯示後才出現不同的備份：按從頭開始時重驗擋下，不建 V、不動舊資料、兩個選項都收起",
+              B.raw() is None and B.raw(O_KEY) == V1 and B.raw(A_KEY) == other and "不一樣" in box and not B.has("#legacyRestore") and not B.has("#legacyFresh") and not B.errors,
+              {"raw": B.raw(), "box": box[:100], "errors": B.errors})
+    finally:
+        ctx.close()
+
+
+def r14(browser, label, dev):
+    """R14（自然）：先選「從頭開始」、V 寫後回讀失敗：畫面只剩「重新檢查」（不能改選恢復）；重新檢查後公布「從頭開始」，實際 V 也是空白。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        if not is_sci(B):
+            print(f"SKIP {label} R14 本站沒有舊版存檔（設計 S0）"); return
+        seed(B, {O_KEY: V1})
+        B.p.locator("#legacyFresh").click()
+        B.ev("() => { window.__failGetV = 1; }")              # 確定後：前置讀 V 放行，寫入後的回讀失敗一次
+        B.p.locator("#legacyYes").click()
+        box = B.p.locator("#legacyBox").inner_text() if B.has("#legacyBox") else ""
+        locked = "尚未確認" in box and B.has("#legacyRecheck") and not B.has("#legacyRestore") and not B.has("#legacyFresh") and B.raw(O_KEY) == V1
+        B.p.locator("#legacyRecheck").click()
+        s = B.state(); note = B.p.locator("#banners").inner_text()
+        check(f"{label} R14 回讀失敗：鎖定只剩重新檢查；重查後公布「從頭開始」、實際 V 是空白、O 封存",
+              locked and s is not None and s["settings"]["unit3"] is False and "已從頭開始" in note and "恢復舊版紀錄；" not in note and B.raw(O_KEY) is None and B.raw(A_KEY) == V1 and not B.errors,
+              {"locked": locked, "box": box[:120], "note": note[:120], "errors": B.errors})
+    finally:
+        ctx.close()
+
+
 FLOWS = [
     ("T01", t01, ()), ("T02", t02, ()), ("T03", t03, ()), ("T04", t04, ()),
     ("T05", t05, ("removeItem",)), ("T05", t05, ("clear",)), ("T06", t06, ()),
@@ -1179,6 +1329,8 @@ FLOWS = [
     ("T08", t08b, ()), ("T15", t15_anim, ()),
     ("T17", t17, ()), ("T18", t18, ()), ("T19", t19, ()), ("T24", t24, ()), ("T26", t26, ()),
     ("T27", t27, ("未變",)), ("T27", t27, ("已刪",)), ("T28", t28, ()), ("T29", t29, ()),
+    ("R01", r01, ()), ("R02", r02, ()), ("R03", r03, ()), ("R04", r04, ("同日",)), ("R04", r04, ("跨日",)), ("R05", r05, ()),
+    ("R13", r13, ()), ("R14", r14, ()),
 ]
 
 

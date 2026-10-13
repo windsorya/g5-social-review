@@ -293,16 +293,32 @@ var seq = 0;
 function newId(p){seq++;return (p||"a")+Date.now().toString(36)+seq.toString(36)+Math.floor(Math.random()*1e6).toString(36);}
 function S(){return store.get().state;}
 function V(){return store.view();}
-function act(a){if(a.type!=="tick"&&!a.id)a.id=newId();var r=store.dispatch(a);if(r.error==="STATE_CHANGED"){outdated();return r;}if(r.ok&&a.type!=="tick")reloadNote=false;if(r.ok)readNote=false;banners();return r;}
+function act(a){if(a.type!=="tick"&&!a.id)a.id=newId();var r=store.dispatch(a);if(r.error==="STATE_CHANGED"){outdated();return r;}if(r.ok&&a.type!=="tick")reloadNote=false;banners();return r;}
 
 /* ---------- 存檔在別處被改掉（設計 20261013 方案 A）：整頁失效，重載後用最新的紀錄 ---------- */
 // 另一個分頁、另一台裝置（同步）或清除紀錄改了存檔：這頁的畫面、實驗、待存答案都失去前提，不再寫入。
 // 沒有待存的一步就直接重載；有待存的一步就停下來說清楚「這一步需要重做」，按「載入最新紀錄」才重載。每頁只排一次重載。
 var reloadNote=store.get().reloadNotice, outdatedOn=false, reloading=false;
-// 設計 task-mv6srlue-pujdyl S3：讀不到存檔（READ）＝不能確認有沒有被別處改——畫面停在原處、不前進、不重載，只提示再試一次
-var readNote=false;
-function readFail(){readNote=true;banners();}
-function readOk(){if(readNote){readNote=false;banners();}}
+// 補充設計 task-mv6ujb6v-51m58n C3：切回分頁與「再存一次」走同一條恢復流程 store.resume()（查存檔→補存待存→tick）；
+// 整條都成功（storageStatus＝ok）才公布答案、前進或切畫面，任何一步失敗就停在原畫面（句數、runId、lab 都不動）。
+// 提示一律由 banners() 依核心的 storageStatus 畫出（C1）：沒有別處可以自己清掉的「讀不到」旗標。同一時間只跑一條恢復流程。
+var resuming=false;
+function resumeUI(reason){
+  if(outdatedOn||resuming) return;
+  resuming=true;
+  try{
+    var dayChanged=V().today!==shownDay, r=store.resume();
+    if(r.error==="STATE_CHANGED"){outdated();return;}
+    banners();
+    if(!(r.ok&&r.storageStatus==="ok")) return;
+    // 這一輪確認存進去的答案才公布（用本輪結果的快照，不用先前的 accepted()）
+    if(pending&&!pending.published&&$("#saveFail[data-p]")&&r.state.ops.indexOf(pending.a.id)>=0){$("#saveFail[data-p]").remove();feedback(pending,r.info||{});return;}
+    if(dayChanged){ if(screen==="practice") route(); else renderHome(); renderSide(); }
+    else if(reason==="retry"){ if(!labRefresh(r)) route(); }
+    else if(screen==="home") renderHome();
+    else { if(screen==="lab") labRefresh(r); renderSide(); }
+  } finally { resuming=false; }
+}
 function outdated(){
   if(outdatedOn) return; outdatedOn=true;
   stopAnim();
@@ -321,7 +337,7 @@ function reloadLatest(){if(reloading)return;reloading=true;store.prepareReload()
 window.addEventListener("storage",function(e){
   try{if(e.storageArea&&e.storageArea!==window.localStorage)return;}catch(x){return;}
   if(outdatedOn||!store.watches(e.key))return;
-  if(store.check().error==="STATE_CHANGED")outdated();
+  var r=store.check(); if(r.error==="STATE_CHANGED")outdated(); else banners();   // 補充設計 C3：結果交給同一個渲染，不自己清提示
 });
 window.G5Outdated=function(){store.invalidate();outdated();};   // 跨裝置同步換掉存檔時（onReplaced）走同一條路
 
@@ -358,7 +374,6 @@ function header(){
 function banners(){
   var st=store.get(), h="";
   if(reloadNote) h+='<div class="banner info" id="reloadNote"><strong>紀錄已更新，請從這裡繼續</strong></div>';
-  if(readNote) h+='<div class="banner" id="readNote" role="status"><strong>暫時讀不到紀錄，請再試一次</strong><span class="small">剛剛那一步先停在這裡，沒有存、也沒有往下走。</span></div>';
   if(st.loadError==="SCHEMA") h+='<div class="banner"><strong>存檔讀不出來（可能被改壞了）</strong><span class="small">為了不蓋掉原本的紀錄，現在不會存任何作答。請爸媽到「設定與題庫」決定要不要清除重來。</span></div>';
   // R5/R8（4agent）：只有真的寫不進去（WRITE）才提儲存空間；格式讀不懂就直接指向「設定與題庫」的略過按鈕
   else if(st.loadError==="MIGRATE"&&st.migrateReason==="WRITE") h+='<div class="banner"><strong>舊版的作答紀錄搬不過來</strong><span class="small">可能是這台裝置的儲存空間不夠。舊紀錄還在、沒有被刪；清出一些空間後重新整理頁面，就會再搬一次。這段時間不會存作答。</span></div>';
@@ -366,11 +381,18 @@ function banners(){
   else if(st.loadError) h+='<div class="banner"><strong>讀不到這台裝置的作答紀錄</strong><span class="small">為了不蓋掉看不到的紀錄，現在不會存任何作答。請改用一般瀏覽模式，或重新整理頁面再試。</span></div>';
   else if(memoryOnly) h+='<div class="banner"><strong>這台裝置存不了作答紀錄</strong><span class="small">可能是無痕模式或關閉了網站資料。請改用一般瀏覽模式開啟，否則關掉頁面紀錄就會不見。</span></div>';
   else if(st.saveStatus==="invalid") h+='<div class="banner"><strong>剛剛那一步沒有存（資料檢查沒通過）</strong><span class="small">紀錄沒有被改動。請重新整理頁面；如果一直出現，請爸媽告訴我。</span></div>';
-  else if(st.saveStatus==="failed") h+='<div class="banner"><strong>剛剛那一步沒有存到這台裝置</strong><div class="row"><button class="btn sm" type="button" id="retrySave">再存一次</button></div></div>';
+  // 補充設計 C1：讀不到／沒存只看核心的 storageStatus（不說「沒有存」：前一步可能其實已經存進去）
+  else if(st.storageStatus==="readFailed") h+='<div class="banner" id="readNote" role="status"><strong>暫時讀不到紀錄，先停在這裡，請再試一次</strong><span class="small">還不能確認剛剛那一步有沒有存好，所以畫面先不往下走。</span><div class="row"><button class="btn sm" type="button" id="retrySave">再試一次</button></div></div>';
+  else if(st.storageStatus==="saveFailed") h+='<div class="banner"><strong>剛剛那一步沒有存到這台裝置</strong><div class="row"><button class="btn sm" type="button" id="retrySave">再存一次</button></div></div>';
   var v=V();
   if(v.needsHelp.length) h+='<div class="banner info"><strong>需要爸媽陪著看的觀念：'+v.needsHelp.map(function(c){return esc(CONCEPTS[c].short);}).join("、")+'</strong><span class="small">換了題目還是卡住，這很正常。請陪她看一次圖解，再到「家長摘要」按「已經陪她看過」。</span></div>';
   $("#banners").innerHTML=h;
   on("#retrySave",retrySave);
+  // 題目下方「這一題還沒存」的提示也由這裡依同一個狀態改字（不在別處自己移除或改寫）
+  var sf=document.querySelector("#saveFail[data-p]");
+  if(sf){var acc=pending&&st.state.ops.indexOf(pending.a.id)>=0, rd=st.storageStatus==="readFailed";
+    sf.querySelector("strong").textContent=rd?"暫時讀不到紀錄，先停在這裡，請再試一次":acc?"這一題已經存好了，按下面的按鈕看結果":"這一題還沒存到這台裝置";
+    var sb=sf.querySelector("#saveAgain"); if(sb) sb.textContent=acc&&!rd?"看結果":"再存一次";}
 }
 
 /* ---------- 首頁 ---------- */
@@ -614,30 +636,26 @@ function submit(c,ok,m,selfGraded){
   }
   pending={a:a,c:c,ok:ok,m:m,selfGraded:selfGraded};
   if(!r.ok&&!r.dup){
-    $("#ansBox").insertAdjacentHTML("beforeend",'<div class="fb no" id="saveFail"><strong>這一題還沒存到這台裝置</strong><div class="row"><button class="btn sm" type="button" id="saveAgain">再存一次</button></div></div>');
-    on("#saveAgain",retrySave);
+    $("#ansBox").insertAdjacentHTML("beforeend",'<div class="fb no" id="saveFail" data-p="1"><strong>這一題還沒存到這台裝置</strong><div class="row"><button class="btn sm" type="button" id="saveAgain">再存一次</button></div></div>');
+    on("#saveAgain",retrySave); banners();
     return;
   }
   feedback(pending,r.info||{});
 }
 // 兩個「再存一次」（上方提示列、題目下方）走同一條路：存成功才公布回饋
-function retrySave(){
-  var rr=store.retry(); if(rr.error==="STATE_CHANGED"){outdated();return;} if(rr.error==="READ"){readFail();return;} banners();
-  var f=$("#saveFail");
-  if(f&&pending){ if(store.accepted(pending.a.id)){f.remove();feedback(pending,(rr&&rr.info)||{});} return; }
-  if(rr.ok){ if(!labRefresh()) route(); }
-}
+function retrySave(){resumeUI("retry");}   // 上方與題目下方的按鈕都走同一條恢復流程（補充設計 C3）
 // 補存成功後，如果她還在同一輪「一句一句看懂」，就留在原畫面續接（Codex 審 e195ef98：route() 會把 screen="lab" 導回首頁、只能重開一輪）
 // 回傳 true＝已在原畫面重繪；false＝不在學習畫面（或這一輪不在紀錄裡），交給 route()
-function labRefresh(){
+function labRefresh(verified){
   if(screen!=="lab"||!lab||!run()) return false;
-  // 設計 S3：用記憶體裡的進度重畫之前先查存檔；被別處改了就失效，讀不到就停在原處（回 true：已處理，不交給 route()）
-  var ck=store.check(); if(ck.error==="STATE_CHANGED"){outdated();return true;} if(ck.ok!==true){readFail();return true;} readOk();
+  // 補充設計 C3：resume 內呼叫時帶本輪已核對的結果，直接重繪；單獨呼叫時先 check()，失敗就停在原處（回 true：已處理，不交給 route()）
+  if(!verified){var ck=store.check(); if(ck.error==="STATE_CHANGED"){outdated();return true;} banners(); if(!(ck.ok&&ck.storageStatus==="ok")) return true;}
   if(lab.sync) lab.sync();
   drawPredict(); drawTasks(); drawNav();
   return true;
 }
 function feedback(p,info){
+  p.published=true;
   var c=p.c, ok=p.ok, shaky=ok&&(p.m.unsure||p.m.hint), box=$("#ansBox");
   if(ok){
     var today=V().today, before=S().log.some(function(e){return e.card===c.id&&!e.ok&&e.d<today;});
@@ -833,7 +851,7 @@ function check(i){
   // Codex 審 e195ef98：這一句是之前補存進去的（visibilitychange／再存一次），也要重繪任務與完成鈕，不然完成鈕一直停用
   // 已存過也要先確認存檔沒被別處改掉（Codex 審 04f1e26／889660d／c10c0f9 T08：補存後同頁刪檔，這條捷徑不經 act() 就前進）
   // 設計 task-mv6srlue-pujdyl S3：只有 check().ok===true 才前進；讀不到（READ）也不前進（Codex 審 058240f／8959313／a088333：只攔 STATE_CHANGED、READ 照樣前進）
-  if(rr.tasksDone.indexOf(i)>=0){var ck=store.check();if(ck.error==="STATE_CHANGED"){outdated();return false;}if(ck.ok!==true){readFail();return false;}readOk();drawTasks();drawNav();if(rr.tasksDone.length>=rr.tasks)drawPredict();return true;}
+  if(rr.tasksDone.indexOf(i)>=0){var ck=store.check();if(ck.error==="STATE_CHANGED"){outdated();return false;}banners();if(!(ck.ok&&ck.storageStatus==="ok"))return false;drawTasks();drawNav();if(rr.tasksDone.length>=rr.tasks)drawPredict();return true;}
   var r=act({type:"labTask",runId:lab.runId,task:i});
   if(r.ok){drawTasks();drawNav();if(run().tasksDone.length>=run().tasks)drawPredict();}
   return !!(r.ok||r.dup);
@@ -940,11 +958,7 @@ on("#importBtn",function(){
 /* ---------- 啟動與跨午夜 ---------- */
 document.addEventListener("visibilitychange",function(){
   if(document.visibilityState!=="visible") return;
-  var ck=store.check(); if(ck.error==="STATE_CHANGED"){outdated();return;} if(ck.ok!==true){readFail();return;} readOk();   // 設計 S3：只有確認沒變才重畫
-  var changed=V().today!==shownDay; if(act({type:"tick"}).error==="STATE_CHANGED") return;   // 失效了：不再重畫舊畫面
-  if(changed){ if(screen==="practice") route(); else renderHome(); renderSide(); }
-  else if(screen==="home") renderHome();
-  else { if(screen==="lab") labRefresh(); renderSide(); }
+  resumeUI("visible");   // 補充設計 C3：查存檔、補存、tick 整條成功才重畫；任何一步失敗留在原畫面
 });
 // 補題做好後的連結 #c/<觀念id>（交辦 #1618；取題腳本 --done 組這個網址）：直接打開那個觀念；沒有這個觀念或還沒開放就留在首頁
 function openFromHash(){
