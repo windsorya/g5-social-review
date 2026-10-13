@@ -48,8 +48,6 @@ h1,h2,h3{font-family:var(--f-display);font-weight:400;margin:0;text-wrap:balance
 @media (min-width:821px){.hero{margin:0;border-radius:0 0 var(--r) var(--r)}}
 .banner{border-radius:14px;padding:12px 16px;display:grid;gap:8px;background:var(--bad-soft)}
 .banner.info{background:var(--sun-soft)}
-.outdated{position:fixed;inset:0;z-index:9999;background:rgba(10,20,30,.55);display:flex;align-items:center;justify-content:center;padding:16px}
-.outdated .obox{background:var(--card);color:var(--ink);border-radius:16px;padding:20px;max-width:420px;width:100%;display:grid;gap:10px;box-shadow:var(--shadow)}
 /* 面板 */
 .panel{background:var(--card);border-radius:var(--r);padding:22px;display:grid;gap:16px;box-shadow:var(--shadow);min-width:0}
 .today{display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:center}
@@ -1027,8 +1025,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
 (function (root) {
   "use strict";
   var LS_KEY = "g5soc.v1";    // 同步後端（g5-help/gas/core.js f53bd54）白名單已含這個 key
-  var LS_V1 = null;                 // 設計 task-mv6srlue-pujdyl S0：本站沒有舊版存檔——load() 完全不碰舊版或 .fromV1／.noMigrate 標記 key（不讀 getItem(null)／"null"）
-  var LS_ARC = LS_V1 === null ? null : LS_V1 + ".archived";   // 只有有舊版的站（自然站）才有封存
+  var LS_V1 = "g5soc.none";    // 社會站沒有舊版存檔：讀這個永遠不存在的 key＝不搬家
   var NEW_PER_DAY = 5;
   var NEW_PER_DAY_DIAG = 10;      // 診斷期：先把各觀念的卡各做一遍
   var DIAG_END = "2026-10-18";   // 社會站預計 10/14 起用：前 4 天（10/14–10/17）每天新卡 10 張
@@ -1590,135 +1587,102 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     return s;
   }
 
-  /* ---------- 儲存層：寫入成功才公布（矩陣 27）；存檔被別處改掉就整頁失效（設計 external-change-codex-20261013 方案 A）；
-     舊版紀錄改封存＋家長選擇恢復、READ 不前進（設計 task-mv6srlue-pujdyl S0–S3）；
-     單一存檔狀態 storageStatus＋共同 resume()（補充設計 task-mv6ujb6v-51m58n）；
-     存檔一不正常就整頁暫停、核心只留一筆（4agent 最終方案 (a)，docs/design-storage-pause-20261014.md） ---------- */
+  /* ---------- 儲存層：寫入成功才公布（矩陣 27） ---------- */
   function createStore(opt) {
-    var storage = opt.storage, bank = opt.bank, clock = opt.clock, session = opt.session || null;
-    // 4agent 最終方案 (a)（docs/design-storage-pause-20261014.md）：「存檔一不正常就整頁暫停，核心只留一筆」。
-    // loadError：SCHEMA（存檔讀得到但不合法）／READ（開頁讀不到）——都封鎖寫入，絕不拿空白蓋掉看不到的資料
-    // storageStatus（K2，畫面唯一依據）：stale＞blocked（loadError）＞readFailed＞saveFailed（待存一筆或 tick 沒做完）＞ok
-    // 狀態不是 ok 時，核心拒收任何新操作（BLOCKED、零讀零寫，K3）；只有 resume() 能補存那唯一一筆、補做 tick。
-    var st = { state: blankState(), saveStatus: "ok", pendingAction: null, loadError: null, migrateReason: null, syncMode: "local", migrated: false,
-               stale: false, reloadNotice: false, storageStatus: "ok", tickDue: false, readFailed: false };
+    var storage = opt.storage, bank = opt.bank, clock = opt.clock;
+    // loadError：SCHEMA（存檔讀得到但不合法）／READ（讀不到）／MIGRATE（舊資料搬不進去）——三種都封鎖寫入，絕不拿空白蓋掉看不到的資料
+    // migrateReason（只在 loadError=MIGRATE 時有值）：PARSE 解析失敗／VERSION 版本不支援／BAD_V1 結構不合法／WRITE 寫不進去
+    var st = { state: blankState(), saveStatus: "ok", pendingAction: null, loadError: null, migrateReason: null, syncMode: "local", migrated: false };
     function env() { return { now: clock(), bank: bank }; }
-    // 多分頁：記住「最後讀到／寫入的原文」lastRaw，每次操作前先讀磁碟比對；不一樣＝存檔換代了 → STATE_CHANGED、整頁重載（方案 A）。
-    var lastRaw = null, NOTICE = LS_KEY + ".reloaded";
-    var doneInfo = {};                  // K5：resume 補存成功的那一筆的回饋資訊（畢業等）；後面的 tick 失敗也保留，畫面用 takeInfo(id) 取一次
-    function sGet(k) { try { return session ? session.getItem(k) : null; } catch (e) { return null; } }
-    function sSet(k, v) { try { if (session) { if (v === null) session.removeItem(k); else session.setItem(k, v); } } catch (e) { /* 分頁暫存不能用：只是少了提示 */ } }
-    function status() {
-      st.storageStatus = st.stale ? "stale" : st.loadError ? "blocked" : st.readFailed ? "readFailed" : (st.pendingAction || st.tickDue) ? "saveFailed" : "ok";
-      return st.storageStatus;
-    }
-    // 所有公開操作都回同一組欄位：ok、error、storageStatus、pendingId、state
-    function out(o) { o.storageStatus = status(); o.pendingId = st.pendingAction ? st.pendingAction.id : null; o.state = st.state; return o; }
-    function readErr() { st.readFailed = true; return out({ ok: false, error: "READ" }); }
+    // 多分頁（Codex 審 e6c7ed6）：每個分頁各有一份記憶體狀態；舊版直接拿自己那份算完就寫，
+    // 別的分頁剛存的作答會被蓋掉。現在記住「最後讀到／寫入的原文」，每次操作前先讀磁碟，
+    // 不一樣就換成磁碟上的最新版再套用這次操作（reducer 是純函式，重算即可）。
+    var lastRaw = null;
     function write(next) {
-      if (st.stale) return "stale";
       var errs = checkState(next, bank);
       if (errs.length) return "invalid";
       if (st.loadError) return "blocked";
       var txt = JSON.stringify(next);
-      try { storage.setItem(LS_KEY, txt); } catch (e) { return "failed"; }
-      lastRaw = txt;
-      return "ok";
+      try { storage.setItem(LS_KEY, txt); lastRaw = txt; return "ok"; } catch (e) { return "failed"; }
     }
-    // K6：唯讀比對與 stale 偵測。"ok"／"read"／"changed"；讀成功也不清已觀察到的 readFailed（只有 resume 整條成功才解除）
     function refresh() {
-      if (st.stale) return "changed";
+      if (st.loadError) return true;
       var raw;
-      try { raw = storage.getItem(LS_KEY); } catch (e) { return "read"; }
-      if (raw !== lastRaw) { st.stale = true; return "changed"; }
-      return "ok";
+      try { raw = storage.getItem(LS_KEY); } catch (e) { return false; }   // 讀不到就不寫，免得蓋掉看不到的資料
+      if (raw === lastRaw) return true;
+      // 原本有存檔、現在被別處整個刪掉：磁碟是唯一真相，沒有存檔＝空白紀錄。換成空白再套用這次操作——
+      // 舊紀錄不會被寫回去，清除與重試也照常成功（Codex 審自然 8362c82／數學 fd585e3：一律拒寫會讓頁面卡死）。
+      if (raw === null) { st.state = blankState(); lastRaw = null; return true; }
+      var r = decode(raw, bank);
+      if (!r.accepted) return false;
+      st.state = r.state; lastRaw = raw;
+      return true;
     }
-    function changed() { return out({ ok: false, error: "STATE_CHANGED", pending: !!st.pendingAction }); }
     function load() {
-      var raw = null;
-      st.reloadNotice = sGet(NOTICE) === "1"; if (st.reloadNotice) sSet(NOTICE, null);
-      try { raw = storage.getItem(LS_KEY); } catch (e) { st.loadError = "READ"; st.saveStatus = "blocked"; status(); return st; }
-      lastRaw = raw;   // 壞掉的存檔也記原文：沒再變就不算外部變更（不會重載循環）
+      var raw = null, old = null;
+      try { raw = storage.getItem(LS_KEY); } catch (e) { st.loadError = "READ"; st.saveStatus = "blocked"; return st; }
       if (raw !== null) {
         var r = decode(raw, bank);
-        if (r.accepted) st.state = r.state;
-        else { st.loadError = r.error; st.saveStatus = "blocked"; }
+        if (r.accepted) { st.state = r.state; lastRaw = raw; } else { st.loadError = r.error; st.saveStatus = "blocked"; }
+        return st;
       }
-      status(); return st;                                           // 設計 S0：不碰舊版或標記 key
+      try { old = storage.getItem(LS_V1); } catch (e) { st.loadError = "READ"; st.saveStatus = "blocked"; return st; }
+      if (old !== null) {
+        var why = v1Problem(old), m = why ? null : migrateV1(old, clock(), bank);
+        if (!m) { st.loadError = "MIGRATE"; st.migrateReason = why || "BAD_V1"; st.saveStatus = "blocked"; return st; }
+        var w = write(m);   // 寫入成功才公布；寫不進去就封鎖，下次開啟再搬（v1 原文始終不動）
+        if (w === "ok") { st.state = m; st.migrated = true; st.saveStatus = "ok"; }
+        else { st.loadError = "MIGRATE"; st.migrateReason = "WRITE"; st.saveStatus = "blocked"; }
+      }
+      return st;
     }
-    // 真正執行一筆操作。internal＝resume 的補存路徑（可以繞過閘門）；一般 dispatch 在狀態不是 ok 時一律拒收（K3）
-    function run(action, internal) {
-      if (st.stale) return changed();
-      if (!internal && status() !== "ok") return out({ ok: false, error: "BLOCKED" });
-      var isTick = !!action && action.type === "tick";
-      var f = refresh();
-      if (f === "changed") return changed();
-      if (f === "read") {                                            // K7：讀不到就是 READ；有 id 的收成唯一待存、tick 記成沒做完
-        if (action && action.id && !st.pendingAction) st.pendingAction = action;
-        if (isTick) st.tickDue = true;
-        return readErr();
+    // 先把待重試的操作補寫；補不進去就不接受新操作（不讓 tick 之類的操作把它沖掉）
+    function flushPending() {
+      if (!st.pendingAction) return true;
+      if (!refresh()) { st.saveStatus = "failed"; return false; }
+      var a = st.pendingAction, r = reduce(st.state, a, env());
+      if (r.error || r.dup) { st.pendingAction = null; return true; }
+      var w = write(r.state);
+      if (w !== "ok") { st.saveStatus = w; return false; }
+      st.state = r.state; st.saveStatus = "ok"; st.pendingAction = null;
+      return true;
+    }
+    function dispatch(action) {
+      // 先處理既有的待存操作（它自己會先讀磁碟）；補不進去就照舊回 SAVE_PENDING，畫面才會保留原本那筆
+      // （Codex 審 2e70601：上一版先 refresh、失敗就回 SAVE_FAILED，畫面把待存換成新的那筆，恢復後重試只存舊的）。
+      if (st.pendingAction && !(action && action.id && action.id === st.pendingAction.id)) {
+        if (!flushPending()) return { ok: false, error: "SAVE_PENDING", pendingId: st.pendingAction.id, state: st.state };
+      }
+      if (!refresh()) {   // 磁碟上的最新版讀不到、讀不懂或被刪掉：這次不寫（不拿舊的記憶體狀態蓋掉），有 id 的留著重試
+        st.saveStatus = "failed";
+        if (action && action.id) st.pendingAction = action;
+        return { ok: false, error: "SAVE_FAILED", state: st.state };
       }
       var r = reduce(st.state, action, env());
       if (r.error || r.dup) {
         if (r.dup && st.pendingAction && action.id === st.pendingAction.id) st.pendingAction = null;
-        return out({ ok: !r.error, error: r.error, dup: !!r.dup, info: r.info });   // 業務錯誤原樣回報；補存的那筆遇業務錯誤也不丟（停住）
+        return { ok: !r.error, error: r.error, dup: !!r.dup, info: r.info, state: st.state };
       }
       var w = write(r.state);
       if (w !== "ok") {
         st.saveStatus = w;
-        if (action.id && !st.pendingAction) st.pendingAction = action;
-        if (isTick && w === "failed") st.tickDue = true;
-        return out({ ok: false, error: w === "invalid" ? "INVARIANT" : "SAVE_" + w.toUpperCase() });
+        if (action.id) st.pendingAction = action;   // tick 沒有 id：失敗就算了，下次再 tick
+        return { ok: false, error: w === "invalid" ? "INVARIANT" : "SAVE_" + w.toUpperCase(), state: st.state };
       }
-      st.state = r.state; st.saveStatus = "ok";
-      if (st.pendingAction && st.pendingAction.id === action.id) st.pendingAction = null;
-      if (isTick) st.tickDue = false;
-      return out({ ok: true, info: r.info });
+      st.state = r.state; st.saveStatus = "ok"; if (st.pendingAction && st.pendingAction.id === action.id) st.pendingAction = null;
+      return { ok: true, info: r.info, state: st.state };
     }
-    function dispatch(action) { return run(action, false); }
-    // K4：恢復流程固定為「查當下存檔 → 補存唯一待存 → tick」，每一步失敗就停、回該步的結果；全部成功才回 ok。
-    function resume() {
-      if (st.stale) return changed();
-      if (st.loadError === "READ") return out({ ok: false, error: "RELOAD_REQUIRED" });   // 開頁讀不到：只能整頁重載重讀（A14）
-      if (st.loadError) return out({ ok: false, error: "BLOCKED" });                       // 壞檔：交給家長清除
-      var f = refresh();
-      if (f === "changed") return changed();
-      if (f === "read") return readErr();
-      st.readFailed = false;                                         // 這一次讀到了：之後的失敗由各步驟重新判定
-      var acc = null, nothing = !st.pendingAction;
-      if (st.pendingAction) {
-        var pid = st.pendingAction.id, r = run(st.pendingAction, true);
-        if (!r.ok) return r;
-        acc = pid; if (r.info) doneInfo[pid] = r.info;
-      }
-      var t = run({ type: "tick" }, true);
-      if (!t.ok) { t.acceptedId = acc; return t; }
-      return out({ ok: status() === "ok", acceptedId: acc, nothing: nothing });
-    }
-    function takeInfo(id) { var i = doneInfo[id] || null; delete doneInfo[id]; return i; }
-    function retry() { return resume(); }
-    // storage 事件、單獨查核：只讀比對。ok＝這次讀到了而且沒變；整體能不能前進看 storageStatus
-    function check() {
-      var f = refresh();
-      if (f === "changed") return changed();
-      if (f === "read") return readErr();
-      return out({ ok: true, error: null });
-    }
-    function invalidate() { st.stale = true; return changed(); }
-    function watches(key) { return key === null || key === LS_KEY; }
-    function prepareReload() { st.pendingAction = null; sSet(NOTICE, "1"); }
-    function accepted(id) { return st.state.ops.indexOf(id) >= 0; }
-    function discardBroken() {   // 家長明確按「清除壞掉的存檔，重新開始」（兩步確認）：一樣先驗證、寫入成功才公布
-      if (st.loadError !== "SCHEMA") return false;
-      if (refresh() !== "ok") return false;
+    function retry() { return st.pendingAction ? dispatch(st.pendingAction) : { ok: true, nothing: true, state: st.state }; }
+    function accepted(id) { return st.state.ops.indexOf(id) >= 0; }   // 畫面只在「這個操作 ID 真的寫進去了」才公布結果
+    function discardBroken() {   // 家長明確按「清除並重新開始」：一樣先驗證、寫入成功才公布；v1 原文不動
+      if (st.loadError !== "SCHEMA" && st.loadError !== "MIGRATE") return false;
       var b0 = blankState();
       if (checkState(b0, bank).length) return false;
       try { storage.setItem(LS_KEY, JSON.stringify(b0)); lastRaw = JSON.stringify(b0); } catch (e) { st.saveStatus = "failed"; return false; }
-      st.loadError = null; st.migrateReason = null; st.state = b0; st.saveStatus = "ok"; st.pendingAction = null; st.readFailed = false; status();   // 清除成功＝已讀寫成功，殘留 readFailed 一併解除（審 Codex 1e929cd）
+      st.loadError = null; st.migrateReason = null; st.state = b0; st.saveStatus = "ok"; st.pendingAction = null;
       return true;
     }
-    return { get: function () { return st; }, load: load, dispatch: dispatch, retry: retry, resume: resume, takeInfo: takeInfo, accepted: accepted, discardBroken: discardBroken,
-             check: check, invalidate: invalidate, watches: watches, prepareReload: prepareReload,
+    return { get: function () { return st; }, load: load, dispatch: dispatch, retry: retry, accepted: accepted, discardBroken: discardBroken,
              view: function () { return view(st.state, env()); }, env: env };
   }
 
@@ -1762,7 +1726,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
   function dirName(az) { var D = ["北", "東北", "東", "東南", "南", "西南", "西", "西北"]; return D[Math.round((((az % 360) + 360) % 360) / 45) % 8]; }
 
   var api = {
-    LS_KEY: LS_KEY, LS_V1: LS_V1, LS_ARC: LS_ARC, DISSOLVE: DISSOLVE, EXAM: EXAM,
+    LS_KEY: LS_KEY, LS_V1: LS_V1, DISSOLVE: DISSOLVE, EXAM: EXAM,
     dayKey: dayKey, isDay: isDay, addDays: addDays, diffDays: diffDays, weekday: weekday,
     validCard: validCard, blankState: blankState, reduce: reduce, view: view, endTitle: endTitle, exitList: exitList,
     checkState: checkState, decode: decode, migrateV1: migrateV1, createStore: createStore,
@@ -1824,96 +1788,13 @@ function makeStorage(){
   memoryOnly=true; var m={};
   return {getItem:function(k){return Object.prototype.hasOwnProperty.call(m,k)?m[k]:null;},setItem:function(k,v){m[k]=String(v);}};
 }
-// 分頁暫存（sessionStorage）只記「這次是失效後的重載」；不能用就照常運作（只是少了提示）
-function sessionArea(){try{var s=window.sessionStorage;s.getItem(C.LS_KEY);return s;}catch(e){return null;}}
-var store = C.createStore({storage:makeStorage(), bank:BANK, clock:function(){return Date.now();}, session:sessionArea()});
+var store = C.createStore({storage:makeStorage(), bank:BANK, clock:function(){return Date.now();}});
 store.load();
 var seq = 0;
 function newId(p){seq++;return (p||"a")+Date.now().toString(36)+seq.toString(36)+Math.floor(Math.random()*1e6).toString(36);}
 function S(){return store.get().state;}
 function V(){return store.view();}
-function act(a){if(a.type!=="tick"&&!a.id)a.id=newId();var r=store.dispatch(a);if(r.error==="STATE_CHANGED"){outdated();return r;}if(r.ok&&a.type!=="tick")reloadNote=false;banners();return r;}
-
-/* ---------- 存檔在別處被改掉（設計 20261013 方案 A）：整頁失效，重載後用最新的紀錄 ---------- */
-// 另一個分頁、另一台裝置（同步）或清除紀錄改了存檔：這頁的畫面、實驗、待存答案都失去前提，不再寫入。
-// 沒有待存的一步就直接重載；有待存的一步就停下來說清楚「這一步需要重做」，按「載入最新紀錄」才重載。每頁只排一次重載。
-var reloadNote=store.get().reloadNotice, outdatedOn=false, reloading=false;
-// 4agent 最終方案 (a)（docs/design-storage-pause-20261014.md）：存檔一不正常就整頁暫停。
-// 核心只留一筆待存、狀態不是 ok 就拒收新操作；畫面這邊：狀態不是 ok 時由 renderMask() 蓋上整頁遮罩（U1），
-// 任何會換畫面或往前走的入口第一行先問 canGo()（U3）；只有遮罩的「再試一次」與切回分頁會呼叫 resume（U5、U6）。
-function canGo(){return !outdatedOn&&store.get().storageStatus==="ok";}
-var resuming=false;
-function resumeUI(reason){
-  if(outdatedOn||resuming) return;
-  resuming=true;
-  try{
-    var dayChanged=V().today!==shownDay, r=store.resume();
-    if(r.error==="STATE_CHANGED"){outdated();return;}
-    if(r.error==="RELOAD_REQUIRED"){location.reload();return;}   // 開頁就讀不到：只能整頁重讀
-    banners();
-    if(!(r.ok&&r.storageStatus==="ok")) return;                     // 任何一步失敗：遮罩留著、畫面不動
-    // 遮罩期間不可能換頁，所以原題還在：這一題確認存好才公布（回饋資訊由核心保存，K5）
-    if(pending&&!pending.published&&store.accepted(pending.a.id)&&$("#ansBox")){feedback(pending,store.takeInfo(pending.a.id)||{});return;}
-    if(dayChanged){ if(screen==="practice") route(); else renderHome(); renderSide(); }
-    else if(reason==="retry"){ if(screen==="practice"&&pending&&pending.published&&store.accepted(pending.a.id)&&$("#ansBox")){renderSide();}   // 停在已公布的解說（含答錯補救）：留在原題，不跳下一題（審 Codex：恢復跳過解說）
-      else if(!labRefresh(r)) route(); }
-    else if(screen==="home") renderHome();
-    else { if(screen==="lab") labRefresh(r); renderSide(); }
-  } finally { resuming=false; }
-}
-// U2：回首頁＝整頁重載（不補寫待存）；有待存時先在遮罩上確認
-function goHome(){store.prepareReload();location.reload();}
-var maskAsk=false;
-// U1：唯一的遮罩 renderer（只由 banners() 呼叫）。依狀態分文案：不一律說「沒有存」——前一步可能其實已經存好
-function renderMask(){
-  var st=store.get(), m=document.getElementById("storeMask"), h, t;
-  if(outdatedOn||st.storageStatus==="ok"||st.storageStatus==="stale"){
-    if(m){m.remove(); if(!outdatedOn) Array.prototype.forEach.call(document.body.children,function(el){el.inert=false;});}
-    maskAsk=false; return;
-  }
-  if(st.storageStatus==="blocked"&&st.loadError==="SCHEMA") h='<strong id="maskT">存檔讀不出來（可能被改壞了）</strong><span class="small">為了不蓋掉原本的紀錄，現在不會存任何作答。請爸媽決定要不要清除重來。</span><div class="row">'+
-    (maskAsk==="discard"?'<span>確定要清除？舊存檔會被覆蓋。</span><button class="btn warn sm" type="button" id="discardYes">清除</button><button class="btn ghost sm" type="button" id="discardNo">取消</button>':
-      '<button class="btn warn sm" type="button" id="discard">清除壞掉的存檔，重新開始</button><button class="btn ghost sm" type="button" id="maskReload">重新整理</button>')+'</div>';
-  else if(st.storageStatus==="blocked") h='<strong id="maskT">讀不到這台裝置的紀錄</strong><span class="small">為了不蓋掉看不到的紀錄，現在不會存任何作答。請改用一般瀏覽模式，或重新整理頁面再試。</span><div class="row"><button class="btn" type="button" id="maskReload">重新整理</button></div>';
-  else {
-    if(st.storageStatus==="readFailed") t='<strong id="maskT"><span id="readNote">暫時讀不到紀錄，先停在這裡</span></strong><span class="small">還不能確認剛剛那一步有沒有存好，所以先不往下走。等一下按「再試一次」。</span>';
-    else if(st.saveStatus==="invalid") t='<strong id="maskT">剛剛那一步沒有存（資料檢查沒通過）</strong><span class="small">紀錄沒有被改動。請按「回首頁」重新開始；如果一直出現，請爸媽告訴我。</span>';
-    else if(st.pendingAction) t='<strong id="maskT">剛剛那一步還沒存進這台裝置</strong><span class="small">先停在這裡。可能是儲存空間不夠，等一下按「再試一次」。</span>';
-    else t='<strong id="maskT">今天的進度還沒整理好</strong><span class="small">剛剛做的都已經記下來了，只差一步整理。按「再試一次」就好。</span>';
-    h=t+(maskAsk==="home"?'<div class="row"><span>這一步還沒存，回首頁後要重做。確定嗎？</span><button class="btn warn sm" type="button" id="maskHomeYes">確定回首頁</button><button class="btn ghost sm" type="button" id="maskHomeNo">取消</button></div>':
-      '<div class="row"><button class="btn" type="button" id="retrySave">再試一次</button><button class="btn ghost" type="button" id="maskHome">回首頁</button></div>');
-  }
-  if(!m){m=document.createElement("div");m.id="storeMask";m.className="outdated";m.setAttribute("role","alertdialog");m.setAttribute("aria-modal","true");m.setAttribute("aria-labelledby","maskT");
-    Array.prototype.forEach.call(document.body.children,function(el){el.inert=true;}); document.body.appendChild(m);}
-  m.innerHTML='<div class="obox">'+h+'</div>';
-  on("#retrySave",retrySave); on("#maskReload",function(){location.reload();});
-  on("#maskHome",function(){if(store.get().pendingAction){maskAsk="home";renderMask();var y=$("#maskHomeYes");if(y)y.focus();}else goHome();});
-  on("#maskHomeNo",function(){maskAsk=false;renderMask();}); on("#maskHomeYes",goHome);
-  on("#discard",function(){maskAsk="discard";renderMask();}); on("#discardNo",function(){maskAsk=false;renderMask();});
-  on("#discardYes",function(){maskAsk=false;if(!store.discardBroken()&&store.get().stale){outdated();return;}banners();renderHome();renderSide();});
-  var f=m.querySelector("button"); if(f&&!m.contains(document.activeElement)) f.focus();
-}
-function outdated(){
-  if(outdatedOn) return; outdatedOn=true;
-  stopAnim();
-  var st=store.get(), box=document.createElement("div");
-  box.id="outdated"; box.className="outdated"; box.setAttribute("role","alertdialog"); box.setAttribute("aria-modal","true"); box.setAttribute("aria-labelledby","outdatedT");
-  box.innerHTML=st.pendingAction?
-    '<div class="obox"><strong id="outdatedT">紀錄已在別處更新，這一步需要重做</strong><span class="small">剛剛那一步還沒存，載入後請再做一次。</span><div class="row"><button class="btn" type="button" id="loadLatest">載入最新紀錄</button></div></div>':
-    '<div class="obox"><strong id="outdatedT">紀錄已更新，正在重新載入…</strong></div>';
-  Array.prototype.forEach.call(document.body.children,function(el){el.inert=true;});   // 舊畫面不能再按
-  document.body.appendChild(box);
-  if(st.pendingAction){var b=document.getElementById("loadLatest");b.onclick=reloadLatest;b.focus();}
-  else reloadLatest();
-}
-function reloadLatest(){if(reloading)return;reloading=true;store.prepareReload();setTimeout(function(){location.reload();},0);}
-// 別的分頁改了存檔：事件只當通知，store.check() 重讀當下原文比對；別站 key、probe、sessionStorage 都不理
-window.addEventListener("storage",function(e){
-  try{if(e.storageArea&&e.storageArea!==window.localStorage)return;}catch(x){return;}
-  if(outdatedOn||!store.watches(e.key))return;
-  var r=store.check(); if(r.error==="STATE_CHANGED")outdated(); else banners();   // 補充設計 C3：結果交給同一個渲染，不自己清提示
-});
-window.G5Outdated=function(){store.invalidate();outdated();};   // 跨裝置同步換掉存檔時（onReplaced）走同一條路
+function act(a){if(a.type!=="tick"&&!a.id)a.id=newId();var r=store.dispatch(a);banners();return r;}
 
 /* ---------- 小工具 ---------- */
 function $(s){return document.querySelector(s);}
@@ -1947,25 +1828,29 @@ function header(){
 }
 function banners(){
   var st=store.get(), h="";
-  if(reloadNote) h+='<div class="banner info" id="reloadNote"><strong>紀錄已更新，請從這裡繼續</strong></div>';
-  if(memoryOnly&&!st.loadError) h+='<div class="banner"><strong>這台裝置存不了作答紀錄</strong><span class="small">可能是無痕模式或關閉了網站資料。請改用一般瀏覽模式開啟，否則關掉頁面紀錄就會不見。</span></div>';
+  if(st.loadError==="SCHEMA") h+='<div class="banner"><strong>存檔讀不出來（可能被改壞了）</strong><span class="small">為了不蓋掉原本的紀錄，現在不會存任何作答。請爸媽到「設定與題庫」決定要不要清除重來。</span></div>';
+  // R5/R8（4agent）：只有真的寫不進去（WRITE）才提儲存空間；格式讀不懂就直接指向「設定與題庫」的略過按鈕
+  else if(st.loadError==="MIGRATE"&&st.migrateReason==="WRITE") h+='<div class="banner"><strong>舊版的作答紀錄搬不過來</strong><span class="small">可能是這台裝置的儲存空間不夠。舊紀錄還在、沒有被刪；清出一些空間後重新整理頁面，就會再搬一次。這段時間不會存作答。</span></div>';
+  else if(st.loadError==="MIGRATE") h+='<div class="banner"><strong>舊版的作答紀錄格式讀不懂，搬不過來</strong><span class="small">不是空間問題，重新整理也不會好。舊紀錄還在、沒有被刪；請爸媽到下方「設定與題庫」按「略過舊紀錄，從頭開始」。按之前不會存作答。</span></div>';
+  else if(st.loadError) h+='<div class="banner"><strong>讀不到這台裝置的作答紀錄</strong><span class="small">為了不蓋掉看不到的紀錄，現在不會存任何作答。請改用一般瀏覽模式，或重新整理頁面再試。</span></div>';
+  else if(memoryOnly) h+='<div class="banner"><strong>這台裝置存不了作答紀錄</strong><span class="small">可能是無痕模式或關閉了網站資料。請改用一般瀏覽模式開啟，否則關掉頁面紀錄就會不見。</span></div>';
+  else if(st.saveStatus==="invalid") h+='<div class="banner"><strong>剛剛那一步沒有存（資料檢查沒通過）</strong><span class="small">紀錄沒有被改動。請重新整理頁面；如果一直出現，請爸媽告訴我。</span></div>';
+  else if(st.saveStatus==="failed") h+='<div class="banner"><strong>剛剛那一步沒有存到這台裝置</strong><div class="row"><button class="btn sm" type="button" id="retrySave">再存一次</button></div></div>';
   var v=V();
   if(v.needsHelp.length) h+='<div class="banner info"><strong>需要爸媽陪著看的觀念：'+v.needsHelp.map(function(c){return esc(CONCEPTS[c].short);}).join("、")+'</strong><span class="small">換了題目還是卡住，這很正常。請陪她看一次圖解，再到「家長摘要」按「已經陪她看過」。</span></div>';
   $("#banners").innerHTML=h;
-  renderMask();   // 4agent 方案 (a) U1：存檔不正常就整頁暫停
+  on("#retrySave",retrySave);
 }
 
 /* ---------- 首頁 ---------- */
 var screen="home";
 function route(){
-  if(!canGo()){banners();return;}   // 4agent 方案 (a) U3
   var v=V(), se=v.session;
   if(screen==="practice"&&se&&se.queue.length&&!se.halted) return renderPractice();
   if(screen==="practice"||screen==="end") return renderEnd();
   return renderHome();
 }
-function renderHome(boot){
-  if(boot!==true&&!canGo()){banners();return;}   // 只有開頁那一次 renderHome(true) 豁免；被當 click handler 時收到的事件物件不算（審 Codex：#cBack 繞過 U3）   // 4agent 方案 (a) U3（開頁那一次照畫，遮罩蓋在上面）
+function renderHome(){
   screen="home"; leaveLab();
   var v=V(), se=v.session, left=v.remainingIds.length, el=$("#main"), h;
   var inRound=se&&se.day===v.today&&se.queue.length&&!se.halted&&se.answered.length>0;
@@ -2080,7 +1965,6 @@ function toast(t){var el=$("#main"),d=document.createElement("div");d.className=
 /* ---------- 觀念頁（概念入口） ---------- */
 function conceptCards(cid){return C.allCards(S(),BANK).filter(function(c){return c.concept===cid;}).map(function(c){return c.id;});}
 function renderConcept(cid){
-  if(!canGo()){banners();return;}   // 4agent 方案 (a) U3
   screen="concept"; leaveLab();
   var c=CONCEPTS[cid], v=V(), ex=EXPLAIN[cid][0];
   var mine=v.remainingIds.filter(function(id){var k=card(id);return k&&k.concept===cid;}).length, stuck=v.needsHelp.indexOf(cid)>=0;
@@ -2143,9 +2027,7 @@ function answerText(c){return c.type==="recall"?c.ans:c.type==="map"?c.branches.
 
 /* ---------- 練習 ---------- */
 var ui={hint:false,cardId:null};
-function nextQ(){if(!canGo()){banners();return;}renderPractice();}   // 4agent 方案 (a) U3：「下一題」
 function renderPractice(){
-  if(!canGo()){banners();return;}
   screen="practice"; leaveLab();
   var v=V(), se=v.session, el=$("#main");
   if(!se||!se.queue.length||se.halted) return renderEnd();
@@ -2178,7 +2060,8 @@ function renderPractice(){
   el.innerHTML=h; wireTools(c);
   el.querySelectorAll(".opt").forEach(function(b){b.onclick=function(){
     var i=+b.dataset.i, ok=i===c.a; ui.picked=i;
-    el.querySelectorAll(".opt").forEach(function(x){x.disabled=true;});   // 第 3 輪（Codex 審 55509eb）：對錯等這一題確認存好、公布回饋時才標
+    el.querySelectorAll(".opt").forEach(function(x){x.disabled=true;if(+x.dataset.i===c.a)x.classList.add("right");});
+    if(!ok) b.classList.add("wrong");
     submit(c,ok,meta());
   };});
 }
@@ -2187,31 +2070,40 @@ function wireTools(c){
 }
 function meta(){var u=$("#unsure");return {unsure:!!(u&&u.checked),hint:ui.hint};}
 var pending=null;
-// 選擇題的正解／錯解只在公布回饋時標（這一題已確認存好）
-function markOpts(p){var el=$("#main");if(!el||!p.c.opts)return;el.querySelectorAll(".opt").forEach(function(x){var i=+x.dataset.i;if(i===p.c.a)x.classList.add("right");else if(!p.ok&&i===p.picked)x.classList.add("wrong");});}
 function submit(c,ok,m,selfGraded){
-  if(!canGo()){banners();return;}   // 4agent 方案 (a) U4：暫停中不收作答
   var a={type:"answer",id:newId(),cardId:c.id,ok:ok,hint:!!m.hint,unsure:!!m.unsure,variation:!!ui.variation};
-  pending={a:a,c:c,ok:ok,m:m,selfGraded:selfGraded,picked:ui.picked};   // 只用來公布這一題，禁止拿它補送（補存是核心的事）
   var r=act(a);
-  if(r.error==="STATE_CHANGED") return;   // 存檔換代：這一題不公布對錯，交給重載
-  if(r.ok){feedback(pending,r.info||{});return;}
-  if(store.get().storageStatus==="ok"){pending=null;route();return;}   // 業務錯誤（不是存檔問題）：重畫這一題
-  // READ／SAVE_FAILED：這一題由核心持有（唯一待存）；選項維持停用、不標對錯；遮罩已由 act→banners() 打開
+  if(!r.ok&&!r.dup&&r.error==="SAVE_PENDING"){
+    $("#ansBox").insertAdjacentHTML("beforeend",'<div class="fb no" id="saveFail"><strong>上一步還沒存到這台裝置，這一題先不算</strong><span class="small">按上方的「再存一次」，存好以後再作答這一題。</span></div>');
+    // R2（4agent M04）：1.6 秒後重繪前先確認她還在同一題的答題畫面；已離開（觀念頁、實驗室、首頁）就不搶回
+    var here=ui;
+    setTimeout(function(){if(screen==="practice"&&ui===here)renderPractice();},1600);
+    return;
+  }
+  pending={a:a,c:c,ok:ok,m:m,selfGraded:selfGraded};
+  if(!r.ok&&!r.dup){
+    $("#ansBox").insertAdjacentHTML("beforeend",'<div class="fb no" id="saveFail"><strong>這一題還沒存到這台裝置</strong><div class="row"><button class="btn sm" type="button" id="saveAgain">再存一次</button></div></div>');
+    on("#saveAgain",retrySave);
+    return;
+  }
+  feedback(pending,r.info||{});
 }
-function retrySave(){if(!document.getElementById("storeMask"))return;resumeUI("retry");}   // 遮罩上的「再試一次」（4agent 方案 (a) U5）；遮罩已關＝舊按鈕的延遲點擊，不再動作
+// 兩個「再存一次」（上方提示列、題目下方）走同一條路：存成功才公布回饋
+function retrySave(){
+  var rr=store.retry(); banners();
+  var f=$("#saveFail");
+  if(f&&pending){ if(store.accepted(pending.a.id)){f.remove();feedback(pending,(rr&&rr.info)||{});} return; }
+  if(rr.ok){ if(!labRefresh()) route(); }
+}
 // 補存成功後，如果她還在同一輪「一句一句看懂」，就留在原畫面續接（Codex 審 e195ef98：route() 會把 screen="lab" 導回首頁、只能重開一輪）
 // 回傳 true＝已在原畫面重繪；false＝不在學習畫面（或這一輪不在紀錄裡），交給 route()
-function labRefresh(verified){
+function labRefresh(){
   if(screen!=="lab"||!lab||!run()) return false;
-  // 補充設計 C3：resume 內呼叫時帶本輪已核對的結果，直接重繪；單獨呼叫時先 check()，失敗就停在原處（回 true：已處理，不交給 route()）
-  if(!verified){if(!canGo()){banners();return true;} var ck=store.check(); if(ck.error==="STATE_CHANGED"){outdated();return true;} banners(); if(!(ck.ok&&ck.storageStatus==="ok")) return true;}
   if(lab.sync) lab.sync();
   drawPredict(); drawTasks(); drawNav();
   return true;
 }
 function feedback(p,info){
-  p.published=true; markOpts(p);
   var c=p.c, ok=p.ok, shaky=ok&&(p.m.unsure||p.m.hint), box=$("#ansBox");
   if(ok){
     var today=V().today, before=S().log.some(function(e){return e.card===c.id&&!e.ok&&e.d<today;});
@@ -2220,7 +2112,7 @@ function feedback(p,info){
     if(!p.selfGraded) box.insertAdjacentHTML("beforeend",'<div class="fb ok"><strong>'+esc(msg)+'</strong><span>'+esc(c.why||"")+'</span>'+(c.type==="figure"?figureSvg(c.fig,true):"")+srcLine(c)+'</div>');
     else box.insertAdjacentHTML("beforeend",'<div class="fb ok"><strong>'+esc(msg)+'</strong></div>');
     box.insertAdjacentHTML("beforeend",'<div class="row"><button class="btn" id="next" type="button">下一題</button></div>');
-    on("#next",nextQ); $("#next").focus();
+    on("#next",renderPractice); $("#next").focus();
     return;
   }
   if(info.halted||(!p.ok&&p.a&&p.a.variation&&S().session&&S().session.halted)) return renderHalted(c,p.selfGraded);
@@ -2236,7 +2128,7 @@ function feedback(p,info){
     if(k==="concept") return remedy(c);
     var tip={reading:"下次先把題目的關鍵字圈起來，再看選項。",slip:"知道答案很棒！下次選之前再對一次題目。","":"沒關係，這張卡明天會再出現。"}[k];
     box.insertAdjacentHTML("beforeend",'<div class="fb ok"><span>'+esc(tip)+'</span><div class="row"><button class="btn" type="button" id="next">下一題</button></div></div>');
-    on("#next",nextQ); $("#next").focus();
+    on("#next",renderPractice); $("#next").focus();
   };});
 }
 // 補救（2026-10-11 律師：答錯後的解說要「白話易懂、圖多一些、有影片就附上」）：
@@ -2366,7 +2258,6 @@ function stopAnim(){if(labTimer){cancelAnimationFrame(labTimer);labTimer=null;}}
 function leaveLab(){stopAnim();lab=null;}
 var lab=null;
 function openLab(cid,ctx){
-  if(!canGo()){banners();return;}   // 4agent 方案 (a) U3
   stopAnim(); screen="lab";
   var con=CONCEPTS[cid], key=con.lab, pr=PREDICT[cid], tasks=EXPLAIN[cid][0].lines.map(function(t,i){return "看懂第 "+(i+1)+" 句："+t;}), runId=newId("r");
   var r=act({type:"labStart",runId:runId,lab:key,tasks:tasks.length,answer:pr.a,from:ctx.from,card:ctx.card||undefined});
@@ -2387,9 +2278,8 @@ function drawPredict(){
   else h+='<span>'+(rr.predictionCorrect?'你想對了！':'你想的是「'+esc(pr.opts[rr.prediction])+'」，實際是「'+esc(pr.opts[pr.a])+'」。')+esc(pr.why)+'</span>';
   $("#labPredict").innerHTML=h;
   $("#labPredict").querySelectorAll("button[data-g]").forEach(function(b){b.onclick=function(){
-    if(!canGo()){banners();return;}   // 4agent 方案 (a) U3（Codex 審 0f1db5a #2）：tick 沒做完／有待存時預測不前進
     var r=act({type:"labPredict",runId:lab.runId,choice:+b.dataset.g});
-    if(!r.ok||r.storageStatus!=="ok") return;
+    if(!r.ok) return;
     $("#labBody").hidden=false; $("#labTask").hidden=false;
     drawPredict(); drawTasks(); drawNav();
     if(LABS[lab.key]&&LABS[lab.key].after) LABS[lab.key].after();
@@ -2406,27 +2296,23 @@ function check(i){
   if(!lab) return false;
   var rr=run();
   if(!rr||rr.phase==="predict") return false;
-  if(!canGo()){banners();return false;}   // 4agent 方案 (a) U3：暫停中句數不增
   // Codex 審 e195ef98：這一句是之前補存進去的（visibilitychange／再存一次），也要重繪任務與完成鈕，不然完成鈕一直停用
-  // 已存過也要先確認存檔沒被別處改掉（Codex 審 04f1e26／889660d／c10c0f9 T08：補存後同頁刪檔，這條捷徑不經 act() 就前進）
-  // 設計 task-mv6srlue-pujdyl S3：只有 check().ok===true 才前進；讀不到（READ）也不前進（Codex 審 058240f／8959313／a088333：只攔 STATE_CHANGED、READ 照樣前進）
-  if(rr.tasksDone.indexOf(i)>=0){var ck=store.check();if(ck.error==="STATE_CHANGED"){outdated();return false;}banners();if(!(ck.ok&&ck.storageStatus==="ok"))return false;drawTasks();drawNav();if(rr.tasksDone.length>=rr.tasks)drawPredict();return true;}
+  if(rr.tasksDone.indexOf(i)>=0){drawTasks();drawNav();if(rr.tasksDone.length>=rr.tasks)drawPredict();return true;}
   var r=act({type:"labTask",runId:lab.runId,task:i});
-  if(!((r.ok||r.dup)&&r.storageStatus==="ok")) return false;
-  drawTasks();drawNav();if(run().tasksDone.length>=run().tasks)drawPredict();
-  return true;
+  if(r.ok){drawTasks();drawNav();if(run().tasksDone.length>=run().tasks)drawPredict();}
+  return !!(r.ok||r.dup);
 }
 function drawNav(){
   var rr=run(), all=rr.prediction!==null&&rr.tasksDone.length>=rr.tasks, nav=$("#labNav");
   if(lab.ctx.from==="wrong"){
     nav.innerHTML='<button class="btn" type="button" id="labDone"'+(all?'':' disabled')+'>'+(all?'我看懂了，換一題確認':(rr.prediction===null?'先想一想，再看解說':'每一句都看過後就能換一題確認'))+'</button><button class="btn ghost sm" type="button" id="labSkip">先回到練習</button>';
-    on("#labDone",function(){if(!canGo()){banners();return;}stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(!(r.ok||r.dup)||r.storageStatus!=="ok")return;lab=null;screen="practice";route();});
-    on("#labSkip",function(){if(!canGo()){banners();return;}stopAnim();lab=null;screen="practice";route();});
+    on("#labDone",function(){stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(!r.ok&&!r.dup)return;lab=null;screen="practice";route();});
+    on("#labSkip",function(){stopAnim();lab=null;screen="practice";route();});
   }else{
     nav.innerHTML='<button class="btn" type="button" id="labDone"'+(all?'':' disabled')+'>'+(all?'完成了':'每一步都看過後按這裡')+'</button><button class="btn ghost sm" type="button" id="labHome">回首頁</button>';
-    on("#labDone",function(){if(!canGo()){banners();return;}stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(!(r.ok||r.dup)||r.storageStatus!=="ok")return;lab=null;
+    on("#labDone",function(){stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(!r.ok&&!r.dup)return;lab=null;
       $("#main").innerHTML='<div class="done"><b class="t">看完了</b><p class="muted" style="margin:0">把解說看懂了，再回去練卡片或考考爸媽。</p><div class="row" style="justify-content:center"><button class="btn ghost" type="button" id="back3">回首頁</button></div></div>';on("#back3",renderHome);renderSide();});
-    on("#labHome",function(){if(!canGo()){banners();return;}stopAnim();lab=null;renderHome();});   // 暫停中先擋，不先清掉 lab（審 Codex 5c3de92 同型）
+    on("#labHome",function(){stopAnim();lab=null;renderHome();});
   }
 }
 
@@ -2491,10 +2377,10 @@ function renderSide(){header();banners();renderConcepts();renderCal();renderExit
 function renderSettings(){
   var s=S(), st=store.get();
   $("#u3").checked=!!s.settings.unit3; $("#snd").innerHTML='<option value="off">關閉</option>'+window.G5Tones.TONES.map(function(t,i){return '<option value="'+i+'">'+(i+1)+'. '+esc(t.name)+'</option>';}).join(""); $("#snd").value=s.settings.sound?String(s.settings.tone||0):"off";
-  $("#storeMsg").textContent=st.loadError?(st.loadError==="SCHEMA"?"存檔讀不出來，目前不會存檔。":"讀不到這台裝置的紀錄，目前不會存檔。"):memoryOnly?"這台裝置存不了作答紀錄。":"作答紀錄只存在這台裝置的瀏覽器（不上傳）。";
+  $("#storeMsg").textContent=st.loadError?(st.loadError==="SCHEMA"?"存檔讀不出來，目前不會存檔。":st.loadError==="MIGRATE"?"舊紀錄搬不過來，目前不會存檔（舊紀錄還在）。":"讀不到這台裝置的紀錄，目前不會存檔。"):memoryOnly?"這台裝置存不了作答紀錄。":"作答紀錄只存在這台裝置的瀏覽器（不上傳）。"+(st.migrated?"已把舊版紀錄搬過來；舊版的「畢業」要重新確認一次。":"");
   var rr=$("#resetRow");
   if(st.loadError==="READ"){rr.innerHTML="";return;}
-  if(st.loadError){rr.innerHTML="";return;}   // 壞檔的清除鈕在暫停遮罩上（4agent 方案 (a) U1）
+  if(st.loadError){rr.innerHTML='<button class="btn warn sm" id="discard" type="button">'+(st.loadError==="MIGRATE"?'略過舊紀錄，從頭開始（舊紀錄保留在這台裝置）':'清除壞掉的存檔，重新開始')+'</button>';on("#discard",function(){rr.innerHTML='<span>確定要清除？舊存檔會被覆蓋。</span><button class="btn warn sm" id="discardYes" type="button">清除</button><button class="btn ghost sm" id="discardNo" type="button">取消</button>';on("#discardNo",renderSettings);on("#discardYes",function(){store.discardBroken();renderHome();});});return;}
   if(!rr.dataset.state){rr.innerHTML='<button class="btn ghost sm" id="resetBtn" type="button">清除全部作答紀錄</button>';
     on("#resetBtn",function(){rr.dataset.state="ask";rr.innerHTML='<span>確定要清除所有作答紀錄？</span><button class="btn warn sm" id="resetYes" type="button">清除</button><button class="btn ghost sm" id="resetNo" type="button">取消</button>';
       on("#resetNo",function(){delete rr.dataset.state;renderSettings();});
@@ -2518,9 +2404,10 @@ on("#importBtn",function(){
 /* ---------- 啟動與跨午夜 ---------- */
 document.addEventListener("visibilitychange",function(){
   if(document.visibilityState!=="visible") return;
-  // 4agent 方案 (a) U6：暫停中只檢查有沒有被別處改（不補存、不重畫）；沒暫停才走 resume（補做 tick，失敗就進暫停）
-  if(store.get().storageStatus!=="ok"){var r=store.check(); if(r.error==="STATE_CHANGED")outdated(); else banners(); return;}
-  resumeUI("visible");
+  var changed=V().today!==shownDay; act({type:"tick"});
+  if(changed){ if(screen==="practice") route(); else renderHome(); renderSide(); }
+  else if(screen==="home") renderHome();
+  else { if(screen==="lab") labRefresh(); renderSide(); }
 });
 // 補題做好後的連結 #c/<觀念id>（交辦 #1618；取題腳本 --done 組這個網址）：直接打開那個觀念；沒有這個觀念或還沒開放就留在首頁
 function openFromHash(){
@@ -2547,7 +2434,7 @@ window.addEventListener("hashchange",openFromHash);
     document.head.appendChild(sc);
   });
 })();
-renderHome(true);
+renderHome();
 openFromHash();
 })();
 </script>
@@ -2567,7 +2454,7 @@ openFromHash();
       endpoint: "https://script.google.com/macros/s/AKfycbxwo08VVT5tSRf-DsQEoo1hMlCm1YytGTzj89BPtJ6YWjPieuKyAPbnWXjUKagBdL6l/exec",
       keys: ["g5soc.v1"], container: "#g5sync",
       summarize: {"g5soc.v1": function(j){ try { var x = JSON.parse(j), c = x.cards || {}, n = Object.keys(c).filter(function(k){ return c[k] && c[k].seen > 0; }).length; return "練過 " + n + " 張卡"; } catch (e) { return "（讀不懂的紀錄）"; } }},
-      onReplaced: function(){ if (window.G5Outdated) { window.G5Outdated(); return; } if (!queued) { queued = true; setTimeout(function(){ location.reload(); }, 0); } }
+      onReplaced: function(){ if (!queued) { queued = true; setTimeout(function(){ location.reload(); }, 0); } }
     });
   } catch (e) { off(); }
 })();

@@ -6,8 +6,7 @@
 (function (root) {
   "use strict";
   var LS_KEY = "g5soc.v1";    // 同步後端（g5-help/gas/core.js f53bd54）白名單已含這個 key
-  var LS_V1 = null;                 // 設計 task-mv6srlue-pujdyl S0：本站沒有舊版存檔——load() 完全不碰舊版或 .fromV1／.noMigrate 標記 key（不讀 getItem(null)／"null"）
-  var LS_ARC = LS_V1 === null ? null : LS_V1 + ".archived";   // 只有有舊版的站（自然站）才有封存
+  var LS_V1 = "g5soc.none";    // 社會站沒有舊版存檔：讀這個永遠不存在的 key＝不搬家
   var NEW_PER_DAY = 5;
   var NEW_PER_DAY_DIAG = 10;      // 診斷期：先把各觀念的卡各做一遍
   var DIAG_END = "2026-10-18";   // 社會站預計 10/14 起用：前 4 天（10/14–10/17）每天新卡 10 張
@@ -569,135 +568,102 @@
     return s;
   }
 
-  /* ---------- 儲存層：寫入成功才公布（矩陣 27）；存檔被別處改掉就整頁失效（設計 external-change-codex-20261013 方案 A）；
-     舊版紀錄改封存＋家長選擇恢復、READ 不前進（設計 task-mv6srlue-pujdyl S0–S3）；
-     單一存檔狀態 storageStatus＋共同 resume()（補充設計 task-mv6ujb6v-51m58n）；
-     存檔一不正常就整頁暫停、核心只留一筆（4agent 最終方案 (a)，docs/design-storage-pause-20261014.md） ---------- */
+  /* ---------- 儲存層：寫入成功才公布（矩陣 27） ---------- */
   function createStore(opt) {
-    var storage = opt.storage, bank = opt.bank, clock = opt.clock, session = opt.session || null;
-    // 4agent 最終方案 (a)（docs/design-storage-pause-20261014.md）：「存檔一不正常就整頁暫停，核心只留一筆」。
-    // loadError：SCHEMA（存檔讀得到但不合法）／READ（開頁讀不到）——都封鎖寫入，絕不拿空白蓋掉看不到的資料
-    // storageStatus（K2，畫面唯一依據）：stale＞blocked（loadError）＞readFailed＞saveFailed（待存一筆或 tick 沒做完）＞ok
-    // 狀態不是 ok 時，核心拒收任何新操作（BLOCKED、零讀零寫，K3）；只有 resume() 能補存那唯一一筆、補做 tick。
-    var st = { state: blankState(), saveStatus: "ok", pendingAction: null, loadError: null, migrateReason: null, syncMode: "local", migrated: false,
-               stale: false, reloadNotice: false, storageStatus: "ok", tickDue: false, readFailed: false };
+    var storage = opt.storage, bank = opt.bank, clock = opt.clock;
+    // loadError：SCHEMA（存檔讀得到但不合法）／READ（讀不到）／MIGRATE（舊資料搬不進去）——三種都封鎖寫入，絕不拿空白蓋掉看不到的資料
+    // migrateReason（只在 loadError=MIGRATE 時有值）：PARSE 解析失敗／VERSION 版本不支援／BAD_V1 結構不合法／WRITE 寫不進去
+    var st = { state: blankState(), saveStatus: "ok", pendingAction: null, loadError: null, migrateReason: null, syncMode: "local", migrated: false };
     function env() { return { now: clock(), bank: bank }; }
-    // 多分頁：記住「最後讀到／寫入的原文」lastRaw，每次操作前先讀磁碟比對；不一樣＝存檔換代了 → STATE_CHANGED、整頁重載（方案 A）。
-    var lastRaw = null, NOTICE = LS_KEY + ".reloaded";
-    var doneInfo = {};                  // K5：resume 補存成功的那一筆的回饋資訊（畢業等）；後面的 tick 失敗也保留，畫面用 takeInfo(id) 取一次
-    function sGet(k) { try { return session ? session.getItem(k) : null; } catch (e) { return null; } }
-    function sSet(k, v) { try { if (session) { if (v === null) session.removeItem(k); else session.setItem(k, v); } } catch (e) { /* 分頁暫存不能用：只是少了提示 */ } }
-    function status() {
-      st.storageStatus = st.stale ? "stale" : st.loadError ? "blocked" : st.readFailed ? "readFailed" : (st.pendingAction || st.tickDue) ? "saveFailed" : "ok";
-      return st.storageStatus;
-    }
-    // 所有公開操作都回同一組欄位：ok、error、storageStatus、pendingId、state
-    function out(o) { o.storageStatus = status(); o.pendingId = st.pendingAction ? st.pendingAction.id : null; o.state = st.state; return o; }
-    function readErr() { st.readFailed = true; return out({ ok: false, error: "READ" }); }
+    // 多分頁（Codex 審 e6c7ed6）：每個分頁各有一份記憶體狀態；舊版直接拿自己那份算完就寫，
+    // 別的分頁剛存的作答會被蓋掉。現在記住「最後讀到／寫入的原文」，每次操作前先讀磁碟，
+    // 不一樣就換成磁碟上的最新版再套用這次操作（reducer 是純函式，重算即可）。
+    var lastRaw = null;
     function write(next) {
-      if (st.stale) return "stale";
       var errs = checkState(next, bank);
       if (errs.length) return "invalid";
       if (st.loadError) return "blocked";
       var txt = JSON.stringify(next);
-      try { storage.setItem(LS_KEY, txt); } catch (e) { return "failed"; }
-      lastRaw = txt;
-      return "ok";
+      try { storage.setItem(LS_KEY, txt); lastRaw = txt; return "ok"; } catch (e) { return "failed"; }
     }
-    // K6：唯讀比對與 stale 偵測。"ok"／"read"／"changed"；讀成功也不清已觀察到的 readFailed（只有 resume 整條成功才解除）
     function refresh() {
-      if (st.stale) return "changed";
+      if (st.loadError) return true;
       var raw;
-      try { raw = storage.getItem(LS_KEY); } catch (e) { return "read"; }
-      if (raw !== lastRaw) { st.stale = true; return "changed"; }
-      return "ok";
+      try { raw = storage.getItem(LS_KEY); } catch (e) { return false; }   // 讀不到就不寫，免得蓋掉看不到的資料
+      if (raw === lastRaw) return true;
+      // 原本有存檔、現在被別處整個刪掉：磁碟是唯一真相，沒有存檔＝空白紀錄。換成空白再套用這次操作——
+      // 舊紀錄不會被寫回去，清除與重試也照常成功（Codex 審自然 8362c82／數學 fd585e3：一律拒寫會讓頁面卡死）。
+      if (raw === null) { st.state = blankState(); lastRaw = null; return true; }
+      var r = decode(raw, bank);
+      if (!r.accepted) return false;
+      st.state = r.state; lastRaw = raw;
+      return true;
     }
-    function changed() { return out({ ok: false, error: "STATE_CHANGED", pending: !!st.pendingAction }); }
     function load() {
-      var raw = null;
-      st.reloadNotice = sGet(NOTICE) === "1"; if (st.reloadNotice) sSet(NOTICE, null);
-      try { raw = storage.getItem(LS_KEY); } catch (e) { st.loadError = "READ"; st.saveStatus = "blocked"; status(); return st; }
-      lastRaw = raw;   // 壞掉的存檔也記原文：沒再變就不算外部變更（不會重載循環）
+      var raw = null, old = null;
+      try { raw = storage.getItem(LS_KEY); } catch (e) { st.loadError = "READ"; st.saveStatus = "blocked"; return st; }
       if (raw !== null) {
         var r = decode(raw, bank);
-        if (r.accepted) st.state = r.state;
-        else { st.loadError = r.error; st.saveStatus = "blocked"; }
+        if (r.accepted) { st.state = r.state; lastRaw = raw; } else { st.loadError = r.error; st.saveStatus = "blocked"; }
+        return st;
       }
-      status(); return st;                                           // 設計 S0：不碰舊版或標記 key
+      try { old = storage.getItem(LS_V1); } catch (e) { st.loadError = "READ"; st.saveStatus = "blocked"; return st; }
+      if (old !== null) {
+        var why = v1Problem(old), m = why ? null : migrateV1(old, clock(), bank);
+        if (!m) { st.loadError = "MIGRATE"; st.migrateReason = why || "BAD_V1"; st.saveStatus = "blocked"; return st; }
+        var w = write(m);   // 寫入成功才公布；寫不進去就封鎖，下次開啟再搬（v1 原文始終不動）
+        if (w === "ok") { st.state = m; st.migrated = true; st.saveStatus = "ok"; }
+        else { st.loadError = "MIGRATE"; st.migrateReason = "WRITE"; st.saveStatus = "blocked"; }
+      }
+      return st;
     }
-    // 真正執行一筆操作。internal＝resume 的補存路徑（可以繞過閘門）；一般 dispatch 在狀態不是 ok 時一律拒收（K3）
-    function run(action, internal) {
-      if (st.stale) return changed();
-      if (!internal && status() !== "ok") return out({ ok: false, error: "BLOCKED" });
-      var isTick = !!action && action.type === "tick";
-      var f = refresh();
-      if (f === "changed") return changed();
-      if (f === "read") {                                            // K7：讀不到就是 READ；有 id 的收成唯一待存、tick 記成沒做完
-        if (action && action.id && !st.pendingAction) st.pendingAction = action;
-        if (isTick) st.tickDue = true;
-        return readErr();
+    // 先把待重試的操作補寫；補不進去就不接受新操作（不讓 tick 之類的操作把它沖掉）
+    function flushPending() {
+      if (!st.pendingAction) return true;
+      if (!refresh()) { st.saveStatus = "failed"; return false; }
+      var a = st.pendingAction, r = reduce(st.state, a, env());
+      if (r.error || r.dup) { st.pendingAction = null; return true; }
+      var w = write(r.state);
+      if (w !== "ok") { st.saveStatus = w; return false; }
+      st.state = r.state; st.saveStatus = "ok"; st.pendingAction = null;
+      return true;
+    }
+    function dispatch(action) {
+      // 先處理既有的待存操作（它自己會先讀磁碟）；補不進去就照舊回 SAVE_PENDING，畫面才會保留原本那筆
+      // （Codex 審 2e70601：上一版先 refresh、失敗就回 SAVE_FAILED，畫面把待存換成新的那筆，恢復後重試只存舊的）。
+      if (st.pendingAction && !(action && action.id && action.id === st.pendingAction.id)) {
+        if (!flushPending()) return { ok: false, error: "SAVE_PENDING", pendingId: st.pendingAction.id, state: st.state };
+      }
+      if (!refresh()) {   // 磁碟上的最新版讀不到、讀不懂或被刪掉：這次不寫（不拿舊的記憶體狀態蓋掉），有 id 的留著重試
+        st.saveStatus = "failed";
+        if (action && action.id) st.pendingAction = action;
+        return { ok: false, error: "SAVE_FAILED", state: st.state };
       }
       var r = reduce(st.state, action, env());
       if (r.error || r.dup) {
         if (r.dup && st.pendingAction && action.id === st.pendingAction.id) st.pendingAction = null;
-        return out({ ok: !r.error, error: r.error, dup: !!r.dup, info: r.info });   // 業務錯誤原樣回報；補存的那筆遇業務錯誤也不丟（停住）
+        return { ok: !r.error, error: r.error, dup: !!r.dup, info: r.info, state: st.state };
       }
       var w = write(r.state);
       if (w !== "ok") {
         st.saveStatus = w;
-        if (action.id && !st.pendingAction) st.pendingAction = action;
-        if (isTick && w === "failed") st.tickDue = true;
-        return out({ ok: false, error: w === "invalid" ? "INVARIANT" : "SAVE_" + w.toUpperCase() });
+        if (action.id) st.pendingAction = action;   // tick 沒有 id：失敗就算了，下次再 tick
+        return { ok: false, error: w === "invalid" ? "INVARIANT" : "SAVE_" + w.toUpperCase(), state: st.state };
       }
-      st.state = r.state; st.saveStatus = "ok";
-      if (st.pendingAction && st.pendingAction.id === action.id) st.pendingAction = null;
-      if (isTick) st.tickDue = false;
-      return out({ ok: true, info: r.info });
+      st.state = r.state; st.saveStatus = "ok"; if (st.pendingAction && st.pendingAction.id === action.id) st.pendingAction = null;
+      return { ok: true, info: r.info, state: st.state };
     }
-    function dispatch(action) { return run(action, false); }
-    // K4：恢復流程固定為「查當下存檔 → 補存唯一待存 → tick」，每一步失敗就停、回該步的結果；全部成功才回 ok。
-    function resume() {
-      if (st.stale) return changed();
-      if (st.loadError === "READ") return out({ ok: false, error: "RELOAD_REQUIRED" });   // 開頁讀不到：只能整頁重載重讀（A14）
-      if (st.loadError) return out({ ok: false, error: "BLOCKED" });                       // 壞檔：交給家長清除
-      var f = refresh();
-      if (f === "changed") return changed();
-      if (f === "read") return readErr();
-      st.readFailed = false;                                         // 這一次讀到了：之後的失敗由各步驟重新判定
-      var acc = null, nothing = !st.pendingAction;
-      if (st.pendingAction) {
-        var pid = st.pendingAction.id, r = run(st.pendingAction, true);
-        if (!r.ok) return r;
-        acc = pid; if (r.info) doneInfo[pid] = r.info;
-      }
-      var t = run({ type: "tick" }, true);
-      if (!t.ok) { t.acceptedId = acc; return t; }
-      return out({ ok: status() === "ok", acceptedId: acc, nothing: nothing });
-    }
-    function takeInfo(id) { var i = doneInfo[id] || null; delete doneInfo[id]; return i; }
-    function retry() { return resume(); }
-    // storage 事件、單獨查核：只讀比對。ok＝這次讀到了而且沒變；整體能不能前進看 storageStatus
-    function check() {
-      var f = refresh();
-      if (f === "changed") return changed();
-      if (f === "read") return readErr();
-      return out({ ok: true, error: null });
-    }
-    function invalidate() { st.stale = true; return changed(); }
-    function watches(key) { return key === null || key === LS_KEY; }
-    function prepareReload() { st.pendingAction = null; sSet(NOTICE, "1"); }
-    function accepted(id) { return st.state.ops.indexOf(id) >= 0; }
-    function discardBroken() {   // 家長明確按「清除壞掉的存檔，重新開始」（兩步確認）：一樣先驗證、寫入成功才公布
-      if (st.loadError !== "SCHEMA") return false;
-      if (refresh() !== "ok") return false;
+    function retry() { return st.pendingAction ? dispatch(st.pendingAction) : { ok: true, nothing: true, state: st.state }; }
+    function accepted(id) { return st.state.ops.indexOf(id) >= 0; }   // 畫面只在「這個操作 ID 真的寫進去了」才公布結果
+    function discardBroken() {   // 家長明確按「清除並重新開始」：一樣先驗證、寫入成功才公布；v1 原文不動
+      if (st.loadError !== "SCHEMA" && st.loadError !== "MIGRATE") return false;
       var b0 = blankState();
       if (checkState(b0, bank).length) return false;
       try { storage.setItem(LS_KEY, JSON.stringify(b0)); lastRaw = JSON.stringify(b0); } catch (e) { st.saveStatus = "failed"; return false; }
-      st.loadError = null; st.migrateReason = null; st.state = b0; st.saveStatus = "ok"; st.pendingAction = null; st.readFailed = false; status();   // 清除成功＝已讀寫成功，殘留 readFailed 一併解除（審 Codex 1e929cd）
+      st.loadError = null; st.migrateReason = null; st.state = b0; st.saveStatus = "ok"; st.pendingAction = null;
       return true;
     }
-    return { get: function () { return st; }, load: load, dispatch: dispatch, retry: retry, resume: resume, takeInfo: takeInfo, accepted: accepted, discardBroken: discardBroken,
-             check: check, invalidate: invalidate, watches: watches, prepareReload: prepareReload,
+    return { get: function () { return st; }, load: load, dispatch: dispatch, retry: retry, accepted: accepted, discardBroken: discardBroken,
              view: function () { return view(st.state, env()); }, env: env };
   }
 
@@ -741,7 +707,7 @@
   function dirName(az) { var D = ["北", "東北", "東", "東南", "南", "西南", "西", "西北"]; return D[Math.round((((az % 360) + 360) % 360) / 45) % 8]; }
 
   var api = {
-    LS_KEY: LS_KEY, LS_V1: LS_V1, LS_ARC: LS_ARC, DISSOLVE: DISSOLVE, EXAM: EXAM,
+    LS_KEY: LS_KEY, LS_V1: LS_V1, DISSOLVE: DISSOLVE, EXAM: EXAM,
     dayKey: dayKey, isDay: isDay, addDays: addDays, diffDays: diffDays, weekday: weekday,
     validCard: validCard, blankState: blankState, reduce: reduce, view: view, endTitle: endTitle, exitList: exitList,
     checkState: checkState, decode: decode, migrateV1: migrateV1, createStore: createStore,
