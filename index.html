@@ -208,6 +208,8 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
       <div><a href="https://www.cwa.gov.tw/" target="_blank" rel="noopener">中央氣象署</a>：季風、梅雨、颱風的官方說明，和氣候觀念有關。</div>
     </div>
   </details>
+  <p class="muted small" id="upCover">本站目前沒有課本、習作上的原題；要練那些，請用下面的補題區傳照片。</p>
+  <details id="upBox"><summary>補題區：傳課本、習作、考卷的照片，加進本站練習</summary><div id="g5upload"></div></details>
   <details id="syncBox"><summary>換電腦或 iPad 也能接著練（跨裝置同步）</summary><div id="g5sync"></div></details>
   <details id="setBox"><summary>設定與題庫</summary>
     <div style="display:grid;gap:14px">
@@ -2407,7 +2409,33 @@ document.addEventListener("visibilitychange",function(){
   else if(screen==="home") renderHome();
   else { if(screen==="lab") labRefresh(); renderSide(); }
 });
+// 補題做好後的連結 #c/<觀念id>（交辦 #1618；取題腳本 --done 組這個網址）：直接打開那個觀念；沒有這個觀念或還沒開放就留在首頁
+function openFromHash(){
+  var m=/^#c\/([\w-]+)$/.exec(location.hash||"");
+  if(!m||!Object.prototype.hasOwnProperty.call(CONCEPTS,m[1])||!conceptOn(m[1])) return;
+  renderConcept(m[1]);
+}
+window.addEventListener("hashchange",openFromHash);
+// 補題區（交辦 #1618）：家長打開才載入共用元件 g5-help/upload.js，孩子平常用不到、不拖慢首頁；載入失敗可以關掉再打開重試
+(function(){
+  var box=document.getElementById("upBox"), state="idle";
+  if(!box) return;
+  function go(){
+    if(!window.G5Upload){ state="idle"; document.getElementById("g5upload").textContent="補題區載入失敗（可能沒有網路），請關掉再打開一次。"; return; }
+    state="done";
+    window.G5Upload.mount("#g5upload",{subject:"社會",site:"g5-social-review",units:Object.keys(UNITS).map(function(k){return {id:k,name:UNITS[k]};})});
+  }
+  box.addEventListener("toggle",function(){
+    if(!box.open||state!=="idle") return;
+    if(window.G5Upload) return go();
+    state="loading";
+    var sc=document.createElement("script"); sc.src="https://windsorya.github.io/g5-help/upload.js";
+    sc.onload=go; sc.onerror=function(){ sc.remove(); go(); };
+    document.head.appendChild(sc);
+  });
+})();
 renderHome();
+openFromHash();
 })();
 </script>
 <script src="https://windsorya.github.io/g5-help/qrcode.js"></script>

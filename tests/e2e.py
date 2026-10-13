@@ -371,6 +371,61 @@ def flow_review(browser):
     ctx.close()
 
 
+# 補題區（交辦 #1618）：家長打開才載入 g5-help/upload.js；本機測試用 g5-help 的原始碼頂替（還沒上線的版本也測得到），GAS 一律攔截不打真後端。
+UP_SRC = ROOT.parent / "g5-help" / "src" / "upload.js"
+UP_PNG = __import__("base64").b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+
+
+def flow_upload(browser, subject, site, bank_global):
+    import json as _j, tempfile as _t
+    live = BASE.startswith("https:")
+    ctx = browser.new_context()
+    ctx.add_init_script("localStorage.setItem('g5sync.code','ABCDEFGHJKMN')")
+    sent, mode = [], {"fail_js": True}
+    def gas(route):
+        req = _j.loads(route.request.post_data or "{}")
+        sent.append(req)
+        body = {"ok": True, "id": "u1"} if req.get("op") == "upload" else {"ok": True, "items": [], "lastFetch": 0} if req.get("op") == "mine" else {"ok": False, "err": "test"}
+        route.fulfill(status=200, content_type="application/json", headers={"Access-Control-Allow-Origin": "*"}, body=_j.dumps(body))
+    ctx.route("**/macros/s/**", gas)
+    def upjs(route):
+        if mode["fail_js"]:
+            return route.abort()
+        if live:
+            return route.continue_()
+        route.fulfill(status=200, content_type="application/javascript", body=UP_SRC.read_text(encoding="utf-8"))
+    ctx.route("**/g5-help/upload.js", upjs)
+    pg = ctx.new_page(); errors = []
+    pg.on("pageerror", lambda e: errors.append(str(e)))
+    pg.goto(URL); pg.wait_for_selector("#main .btn, #main .done")
+    check(f"補題區 首頁沒打開前不載入 upload.js", pg.evaluate("!window.G5Upload && !document.querySelector('script[src*=\"g5-help/upload.js\"]')"))
+    pg.locator("#upBox summary").click()
+    pg.wait_for_function("document.getElementById('g5upload').textContent.indexOf('載入失敗') >= 0", timeout=10000)
+    check(f"補題區 upload.js 載不到：說明可以關掉再打開重試", "關掉再打開" in pg.inner_text("#g5upload"))
+    mode["fail_js"] = False
+    pg.locator("#upBox summary").click(); pg.locator("#upBox summary").click()
+    pg.wait_for_selector("#g5upload .g5u-unit", timeout=20000)
+    units = pg.evaluate(f"Object.keys(window.{bank_global}.UNITS).length")
+    check(f"補題區 重開後掛上元件、單元選單＝本站 {units} 個單元＋不分單元", pg.locator("#g5upload .g5u-unit option").count() == units + 1)
+    pg.set_input_files("#g5upload .g5u-file", files=[{"name": "p.png", "mimeType": "image/png", "buffer": UP_PNG}])
+    pg.fill("#g5upload .g5u-note", "習作第 3 頁")
+    pg.locator("#g5upload .g5u-send").click()
+    pg.wait_for_function("document.querySelector('#g5upload .g5u-out').textContent.indexOf('送出了') >= 0", timeout=15000)
+    ups = [r for r in sent if r.get("op") == "upload"]
+    first_unit = pg.evaluate(f"Object.keys(window.{bank_global}.UNITS)[0]")
+    check(f"補題區 送出：科目＝{subject}、說明前綴【補題:{subject}:{first_unit}】", len(ups) == 1 and ups[0]["subject"] == subject and ups[0]["note"] == f"【補題:{subject}:{first_unit}】習作第 3 頁", ups[:1] and {k: ups[0][k] for k in ("subject", "note")})
+    check(f"補題區 沒有水平捲動", no_overflow(pg))
+    # 做好了的連結 #c/<觀念id> 直接打開那個觀念；不存在的觀念留在首頁
+    cid = pg.evaluate(f"Object.keys(window.{bank_global}.CONCEPTS)[0]")
+    pg.goto(URL + "#c/" + cid); pg.wait_for_selector("#main .remedy", timeout=10000)
+    check(f"補題區 #c/{cid} 直接打開該觀念", pg.locator("#cBack").count() == 1)
+    pg2 = ctx.new_page(); pg2.on("pageerror", lambda e: errors.append(str(e)))
+    pg2.goto(URL + "#c/no-such-concept"); pg2.wait_for_selector("#main .btn, #main .done")
+    check(f"補題區 #c/不存在的觀念：留在首頁", pg2.locator("#main .remedy").count() == 0 and pg2.locator("#concepts .ccard").count() > 0)
+    check(f"補題區 沒有 JS 錯誤", not errors, errors)
+    ctx.close()
+
+
 def main():
     with sync_playwright() as p:
         selftest_player()
@@ -384,11 +439,13 @@ def main():
         flow_main(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True, "device_scale_factor": 2})
         flow_concepts(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True})
         flow_review(cr)
+        flow_upload(cr, "社會", "g5-social-review", "G5SocBank")
         cr.close()
         wk = p.webkit.launch()
         ipad = p.devices["iPad (gen 7)"]
         flow_main(wk, "iPad", ipad)
         flow_concepts(wk, "iPad", ipad)
+        flow_upload(wk, "社會", "g5-social-review", "G5SocBank")
         wk.close()
     bad = [r for r in RESULTS if not r[1]]
     print(f"\n{len(RESULTS) - len(bad)}/{len(RESULTS)} PASS")
