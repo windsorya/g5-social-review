@@ -48,6 +48,8 @@ h1,h2,h3{font-family:var(--f-display);font-weight:400;margin:0;text-wrap:balance
 @media (min-width:821px){.hero{margin:0;border-radius:0 0 var(--r) var(--r)}}
 .banner{border-radius:14px;padding:12px 16px;display:grid;gap:8px;background:var(--bad-soft)}
 .banner.info{background:var(--sun-soft)}
+.outdated{position:fixed;inset:0;z-index:9999;background:rgba(10,20,30,.55);display:flex;align-items:center;justify-content:center;padding:16px}
+.outdated .obox{background:var(--card);color:var(--ink);border-radius:16px;padding:20px;max-width:420px;width:100%;display:grid;gap:10px;box-shadow:var(--shadow)}
 /* 面板 */
 .panel{background:var(--card);border-radius:var(--r);padding:22px;display:grid;gap:16px;box-shadow:var(--shadow);min-width:0}
 .today{display:grid;grid-template-columns:auto 1fr;gap:20px;align-items:center}
@@ -283,13 +285,41 @@ function makeStorage(){
   memoryOnly=true; var m={};
   return {getItem:function(k){return Object.prototype.hasOwnProperty.call(m,k)?m[k]:null;},setItem:function(k,v){m[k]=String(v);}};
 }
-var store = C.createStore({storage:makeStorage(), bank:BANK, clock:function(){return Date.now();}});
+// 分頁暫存（sessionStorage）只記「這次是失效後的重載」；不能用就照常運作（只是少了提示）
+function sessionArea(){try{var s=window.sessionStorage;s.getItem(C.LS_KEY);return s;}catch(e){return null;}}
+var store = C.createStore({storage:makeStorage(), bank:BANK, clock:function(){return Date.now();}, session:sessionArea()});
 store.load();
 var seq = 0;
 function newId(p){seq++;return (p||"a")+Date.now().toString(36)+seq.toString(36)+Math.floor(Math.random()*1e6).toString(36);}
 function S(){return store.get().state;}
 function V(){return store.view();}
-function act(a){if(a.type!=="tick"&&!a.id)a.id=newId();var r=store.dispatch(a);banners();return r;}
+function act(a){if(a.type!=="tick"&&!a.id)a.id=newId();var r=store.dispatch(a);if(r.error==="STATE_CHANGED"){outdated();return r;}if(r.ok&&a.type!=="tick")reloadNote=false;banners();return r;}
+
+/* ---------- 存檔在別處被改掉（設計 20261013 方案 A）：整頁失效，重載後用最新的紀錄 ---------- */
+// 另一個分頁、另一台裝置（同步）或清除紀錄改了存檔：這頁的畫面、實驗、待存答案都失去前提，不再寫入。
+// 沒有待存的一步就直接重載；有待存的一步就停下來說清楚「這一步需要重做」，按「載入最新紀錄」才重載。每頁只排一次重載。
+var reloadNote=store.get().reloadNotice, outdatedOn=false, reloading=false;
+function outdated(){
+  if(outdatedOn) return; outdatedOn=true;
+  stopAnim();
+  var st=store.get(), box=document.createElement("div");
+  box.id="outdated"; box.className="outdated"; box.setAttribute("role","alertdialog"); box.setAttribute("aria-modal","true"); box.setAttribute("aria-labelledby","outdatedT");
+  box.innerHTML=st.pendingAction?
+    '<div class="obox"><strong id="outdatedT">紀錄已在別處更新，這一步需要重做</strong><span class="small">剛剛那一步還沒存，載入後請再做一次。</span><div class="row"><button class="btn" type="button" id="loadLatest">載入最新紀錄</button></div></div>':
+    '<div class="obox"><strong id="outdatedT">紀錄已更新，正在重新載入…</strong></div>';
+  Array.prototype.forEach.call(document.body.children,function(el){el.inert=true;});   // 舊畫面不能再按
+  document.body.appendChild(box);
+  if(st.pendingAction){var b=document.getElementById("loadLatest");b.onclick=reloadLatest;b.focus();}
+  else reloadLatest();
+}
+function reloadLatest(){if(reloading)return;reloading=true;store.prepareReload();setTimeout(function(){location.reload();},0);}
+// 別的分頁改了存檔：事件只當通知，store.check() 重讀當下原文比對；別站 key、probe、sessionStorage 都不理
+window.addEventListener("storage",function(e){
+  try{if(e.storageArea&&e.storageArea!==window.localStorage)return;}catch(x){return;}
+  if(outdatedOn||!store.watches(e.key))return;
+  if(store.check().error==="STATE_CHANGED")outdated();
+});
+window.G5Outdated=function(){store.invalidate();outdated();};   // 跨裝置同步換掉存檔時（onReplaced）走同一條路
 
 /* ---------- 小工具 ---------- */
 function $(s){return document.querySelector(s);}
@@ -323,6 +353,7 @@ function header(){
 }
 function banners(){
   var st=store.get(), h="";
+  if(reloadNote) h+='<div class="banner info" id="reloadNote"><strong>紀錄已更新，請從這裡繼續</strong></div>';
   if(st.loadError==="SCHEMA") h+='<div class="banner"><strong>存檔讀不出來（可能被改壞了）</strong><span class="small">為了不蓋掉原本的紀錄，現在不會存任何作答。請爸媽到「設定與題庫」決定要不要清除重來。</span></div>';
   // R5/R8（4agent）：只有真的寫不進去（WRITE）才提儲存空間；格式讀不懂就直接指向「設定與題庫」的略過按鈕
   else if(st.loadError==="MIGRATE"&&st.migrateReason==="WRITE") h+='<div class="banner"><strong>舊版的作答紀錄搬不過來</strong><span class="small">可能是這台裝置的儲存空間不夠。舊紀錄還在、沒有被刪；清出一些空間後重新整理頁面，就會再搬一次。這段時間不會存作答。</span></div>';
@@ -568,6 +599,7 @@ var pending=null;
 function submit(c,ok,m,selfGraded){
   var a={type:"answer",id:newId(),cardId:c.id,ok:ok,hint:!!m.hint,unsure:!!m.unsure,variation:!!ui.variation};
   var r=act(a);
+  if(r.error==="STATE_CHANGED") return;   // 存檔換代：這一題不公布對錯，交給重載
   if(!r.ok&&!r.dup&&r.error==="SAVE_PENDING"){
     $("#ansBox").insertAdjacentHTML("beforeend",'<div class="fb no" id="saveFail"><strong>上一步還沒存到這台裝置，這一題先不算</strong><span class="small">按上方的「再存一次」，存好以後再作答這一題。</span></div>');
     // R2（4agent M04）：1.6 秒後重繪前先確認她還在同一題的答題畫面；已離開（觀念頁、實驗室、首頁）就不搶回
@@ -585,7 +617,7 @@ function submit(c,ok,m,selfGraded){
 }
 // 兩個「再存一次」（上方提示列、題目下方）走同一條路：存成功才公布回饋
 function retrySave(){
-  var rr=store.retry(); banners();
+  var rr=store.retry(); if(rr.error==="STATE_CHANGED"){outdated();return;} banners();
   var f=$("#saveFail");
   if(f&&pending){ if(store.accepted(pending.a.id)){f.remove();feedback(pending,(rr&&rr.info)||{});} return; }
   if(rr.ok){ if(!labRefresh()) route(); }
@@ -875,7 +907,7 @@ function renderSettings(){
   $("#storeMsg").textContent=st.loadError?(st.loadError==="SCHEMA"?"存檔讀不出來，目前不會存檔。":st.loadError==="MIGRATE"?"舊紀錄搬不過來，目前不會存檔（舊紀錄還在）。":"讀不到這台裝置的紀錄，目前不會存檔。"):memoryOnly?"這台裝置存不了作答紀錄。":"作答紀錄只存在這台裝置的瀏覽器（不上傳）。"+(st.migrated?"已把舊版紀錄搬過來；舊版的「畢業」要重新確認一次。":"");
   var rr=$("#resetRow");
   if(st.loadError==="READ"){rr.innerHTML="";return;}
-  if(st.loadError){rr.innerHTML='<button class="btn warn sm" id="discard" type="button">'+(st.loadError==="MIGRATE"?'略過舊紀錄，從頭開始（舊紀錄保留在這台裝置）':'清除壞掉的存檔，重新開始')+'</button>';on("#discard",function(){rr.innerHTML='<span>確定要清除？舊存檔會被覆蓋。</span><button class="btn warn sm" id="discardYes" type="button">清除</button><button class="btn ghost sm" id="discardNo" type="button">取消</button>';on("#discardNo",renderSettings);on("#discardYes",function(){store.discardBroken();renderHome();});});return;}
+  if(st.loadError){rr.innerHTML='<button class="btn warn sm" id="discard" type="button">'+(st.loadError==="MIGRATE"?'略過舊紀錄，從頭開始（舊紀錄保留在這台裝置）':'清除壞掉的存檔，重新開始')+'</button>';on("#discard",function(){rr.innerHTML='<span>確定要清除？舊存檔會被覆蓋。</span><button class="btn warn sm" id="discardYes" type="button">清除</button><button class="btn ghost sm" id="discardNo" type="button">取消</button>';on("#discardNo",renderSettings);on("#discardYes",function(){if(!store.discardBroken()&&store.get().stale){outdated();return;}renderHome();});});return;}
   if(!rr.dataset.state){rr.innerHTML='<button class="btn ghost sm" id="resetBtn" type="button">清除全部作答紀錄</button>';
     on("#resetBtn",function(){rr.dataset.state="ask";rr.innerHTML='<span>確定要清除所有作答紀錄？</span><button class="btn warn sm" id="resetYes" type="button">清除</button><button class="btn ghost sm" id="resetNo" type="button">取消</button>';
       on("#resetNo",function(){delete rr.dataset.state;renderSettings();});
@@ -899,7 +931,7 @@ on("#importBtn",function(){
 /* ---------- 啟動與跨午夜 ---------- */
 document.addEventListener("visibilitychange",function(){
   if(document.visibilityState!=="visible") return;
-  var changed=V().today!==shownDay; act({type:"tick"});
+  var changed=V().today!==shownDay; if(act({type:"tick"}).error==="STATE_CHANGED") return;   // 失效了：不再重畫舊畫面
   if(changed){ if(screen==="practice") route(); else renderHome(); renderSide(); }
   else if(screen==="home") renderHome();
   else { if(screen==="lab") labRefresh(); renderSide(); }
@@ -949,7 +981,7 @@ openFromHash();
       endpoint: "https://script.google.com/macros/s/AKfycbxwo08VVT5tSRf-DsQEoo1hMlCm1YytGTzj89BPtJ6YWjPieuKyAPbnWXjUKagBdL6l/exec",
       keys: ["g5soc.v1"], container: "#g5sync",
       summarize: {"g5soc.v1": function(j){ try { var x = JSON.parse(j), c = x.cards || {}, n = Object.keys(c).filter(function(k){ return c[k] && c[k].seen > 0; }).length; return "練過 " + n + " 張卡"; } catch (e) { return "（讀不懂的紀錄）"; } }},
-      onReplaced: function(){ if (!queued) { queued = true; setTimeout(function(){ location.reload(); }, 0); } }
+      onReplaced: function(){ if (window.G5Outdated) { window.G5Outdated(); return; } if (!queued) { queued = true; setTimeout(function(){ location.reload(); }, 0); } }
     });
   } catch (e) { off(); }
 })();

@@ -819,11 +819,14 @@ test("M1 兩個分頁：A 存了作答，B 隨後 tick 不得用舊的記憶體�
   const A = C.createStore({ storage: mem, bank: b, clock: () => NOON(D) }); A.load();
   const B = C.createStore({ storage: mem, bank: b, clock: () => NOON(D) }); B.load();
   assert.ok(A.dispatch(op("answer", { cardId: "s1", ok: true })).ok);
-  assert.ok(B.dispatch({ type: "tick" }).ok);
-  assert.deepEqual(Object.keys(JSON.parse(mem.raw["g5soc.v1"]).cards), ["s1"], "A 的作答被 B 蓋掉了");
-  assert.ok(B.dispatch(op("answer", { cardId: "s2", ok: true })).ok);
-  assert.deepEqual(Object.keys(JSON.parse(mem.raw["g5soc.v1"]).cards).sort(), ["s1", "s2"]);
-  assert.deepEqual(Object.keys(B.get().state.cards).sort(), ["s1", "s2"], "B 畫面用的狀態也要換成最新的");
+  // 設計 20261013 方案 A：B 發現存檔換代就失效（STATE_CHANGED、不寫入），整頁重載後才用最新版繼續
+  assert.equal(B.dispatch({ type: "tick" }).error, "STATE_CHANGED");
+  assert.deepEqual(Object.keys(JSON.parse(mem.raw[C.LS_KEY]).cards), ["s1"], "A 的作答被 B 蓋掉了");
+  B.prepareReload();
+  const B2 = C.createStore({ storage: mem, bank: b, clock: () => NOON(D) }); B2.load();
+  assert.ok(B2.dispatch(op("answer", { cardId: "s2", ok: true })).ok);
+  assert.deepEqual(Object.keys(JSON.parse(mem.raw[C.LS_KEY]).cards).sort(), ["s1", "s2"]);
+  assert.deepEqual(Object.keys(B2.get().state.cards).sort(), ["s1", "s2"], "B 重載後畫面用的狀態是最新的");
 });
 
 test("M2 預設每日計畫：每天做完排定的題目、全答對，考前一天以前每張卡都至少練過一次", () => {
@@ -882,20 +885,25 @@ test("M5 別處把存檔整個刪掉後，這個分頁不得把舊紀錄寫回�
   const S = C.createStore({ storage: mem, bank: b, clock: () => NOON(D) }); S.load();
   assert.ok(S.dispatch(op("answer", { cardId: "s1", ok: true })).ok);
   mem.removeItem(C.LS_KEY);
-  // 磁碟上沒有存檔＝空白紀錄（Codex 審 8362c82／fd585e3：上一版改成一律拒寫，連「清除」與「再存一次」都卡死）
-  assert.ok(S.dispatch({ type: "tick" }).ok);
-  assert.deepEqual(Object.keys(JSON.parse(mem.raw[C.LS_KEY]).cards), [], "舊紀錄復活了");
+  // 設計 20261013 方案 A：刪掉＝存檔換代，本頁失效（STATE_CHANGED），不寫入、也不當成空白再套用舊操作
+  assert.equal(S.dispatch({ type: "tick" }).error, "STATE_CHANGED");
+  assert.equal(mem.raw[C.LS_KEY], undefined, "舊紀錄復活了");
 });
 
-test("M6 存檔被刪掉後：再作答只存新的、清除全部紀錄可以成功、待存操作可以重試成功", () => {
+test("M6 存檔被刪掉後：有明確恢復出口——待存操作不重播（回 STATE_CHANGED＋pending），重載後新作答、清除全部紀錄都能成功", () => {
   const b = bank(["s1", "s2"]); const mem = flakyStorage();
   const S = C.createStore({ storage: mem, bank: b, clock: () => NOON(D) }); S.load();
   assert.ok(S.dispatch(op("answer", { cardId: "s1", ok: true })).ok);
-  mem.removeItem(C.LS_KEY);
   mem.setWrite(true); const A = op("answer", { cardId: "s2", ok: true });
   assert.equal(S.dispatch(A).ok, false); mem.setWrite(false);
-  assert.ok(S.retry().ok, "恢復後重試要成功");
+  mem.removeItem(C.LS_KEY);
+  const r = S.retry();
+  assert.deepEqual([r.ok, r.error, r.pending], [false, "STATE_CHANGED", true], "失去前提的待存操作不能再重試成功");
+  assert.equal(mem.raw[C.LS_KEY], undefined);
+  S.prepareReload(); assert.equal(S.get().pendingAction, null, "按「載入最新紀錄」時明確取消舊的待存操作");
+  const S2 = C.createStore({ storage: mem, bank: b, clock: () => NOON(D) }); S2.load();
+  assert.ok(S2.dispatch(op("answer", { cardId: "s2", ok: true })).ok, "重載後新作答要成功");
   assert.deepEqual(Object.keys(JSON.parse(mem.raw[C.LS_KEY]).cards), ["s2"], "只留新的作答");
-  assert.ok(S.dispatch(op("reset")).ok, "清除全部作答紀錄要成功");
+  assert.ok(S2.dispatch(op("reset")).ok, "清除全部作答紀錄要成功");
   assert.deepEqual(Object.keys(JSON.parse(mem.raw[C.LS_KEY]).cards), []);
 });

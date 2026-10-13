@@ -568,45 +568,57 @@
     return s;
   }
 
-  /* ---------- 儲存層：寫入成功才公布（矩陣 27） ---------- */
+  /* ---------- 儲存層：寫入成功才公布（矩陣 27）；存檔被別處改掉就整頁失效（設計 external-change-codex-20261013 方案 A） ---------- */
   function createStore(opt) {
-    var storage = opt.storage, bank = opt.bank, clock = opt.clock;
+    var storage = opt.storage, bank = opt.bank, clock = opt.clock, session = opt.session || null;
     // loadError：SCHEMA（存檔讀得到但不合法）／READ（讀不到）／MIGRATE（舊資料搬不進去）——三種都封鎖寫入，絕不拿空白蓋掉看不到的資料
     // migrateReason（只在 loadError=MIGRATE 時有值）：PARSE 解析失敗／VERSION 版本不支援／BAD_V1 結構不合法／WRITE 寫不進去
-    var st = { state: blankState(), saveStatus: "ok", pendingAction: null, loadError: null, migrateReason: null, syncMode: "local", migrated: false };
+    // stale：這一頁開著時存檔被別處改了（別頁存檔、清除、整個刪掉、改壞、同步換掉）；之後一律回 STATE_CHANGED，只能整頁重載
+    // reloadNotice：這次開頁是失效後的重載（畫面提示「紀錄已更新，請從這裡繼續」）；migrateHeld：失效重載後新版不存在時不搬舊版
+    var st = { state: blankState(), saveStatus: "ok", pendingAction: null, loadError: null, migrateReason: null, syncMode: "local", migrated: false,
+               stale: false, reloadNotice: false, migrateHeld: false };
     function env() { return { now: clock(), bank: bank }; }
-    // 多分頁（Codex 審 e6c7ed6）：每個分頁各有一份記憶體狀態；舊版直接拿自己那份算完就寫，
-    // 別的分頁剛存的作答會被蓋掉。現在記住「最後讀到／寫入的原文」，每次操作前先讀磁碟，
-    // 不一樣就換成磁碟上的最新版再套用這次操作（reducer 是純函式，重算即可）。
-    var lastRaw = null;
+    // 多分頁：每個分頁各有一份記憶體狀態，記住「最後讀到／寫入的原文」lastRaw，每次操作前先讀磁碟比對。
+    // 不一樣＝存檔換代了：回 STATE_CHANGED、鎖定本頁失效；這次不跑 reducer、不寫入、不補寫待存操作，也不換掉記憶體快照
+    // （舊畫面、閉包、按鈕還在讀它；換成空白會拋 TypeError）。上一版「換成磁碟版／空白再套用舊操作」會讓舊 runId、舊回合、
+    // 待存操作失去前提還繼續跑（Codex 設計 20261013 根因），所以改成整頁重載，畫面狀態一起丟掉重來。
+    var lastRaw = null, HOLD = LS_KEY + ".noMigrate", NOTICE = LS_KEY + ".reloaded";
+    function sGet(k) { try { return session ? session.getItem(k) : null; } catch (e) { return null; } }
+    function sSet(k, v) { try { if (session) { if (v === null) session.removeItem(k); else session.setItem(k, v); } } catch (e) { /* 分頁暫存不能用就算了 */ } }
     function write(next) {
+      if (st.stale) return "stale";
       var errs = checkState(next, bank);
       if (errs.length) return "invalid";
       if (st.loadError) return "blocked";
       var txt = JSON.stringify(next);
-      try { storage.setItem(LS_KEY, txt); lastRaw = txt; return "ok"; } catch (e) { return "failed"; }
+      try { storage.setItem(LS_KEY, txt); } catch (e) { return "failed"; }
+      lastRaw = txt;
+      if (st.migrateHeld) { st.migrateHeld = false; sSet(HOLD, null); }   // 新存檔成功了，之後不必再擋舊版搬移
+      return "ok";
     }
+    // "ok"＝磁碟跟上次一樣；"fail"＝讀不到（不寫、待存留著重試，不當成空白）；"changed"＝被別處改了（本頁失效）
     function refresh() {
-      if (st.loadError) return true;
+      if (st.stale) return "changed";
       var raw;
-      try { raw = storage.getItem(LS_KEY); } catch (e) { return false; }   // 讀不到就不寫，免得蓋掉看不到的資料
-      if (raw === lastRaw) return true;
-      // 原本有存檔、現在被別處整個刪掉：磁碟是唯一真相，沒有存檔＝空白紀錄。換成空白再套用這次操作——
-      // 舊紀錄不會被寫回去，清除與重試也照常成功（Codex 審自然 8362c82／數學 fd585e3：一律拒寫會讓頁面卡死）。
-      if (raw === null) { st.state = blankState(); lastRaw = null; return true; }
-      var r = decode(raw, bank);
-      if (!r.accepted) return false;
-      st.state = r.state; lastRaw = raw;
-      return true;
+      try { raw = storage.getItem(LS_KEY); } catch (e) { return "fail"; }
+      if (raw !== lastRaw) { st.stale = true; return "changed"; }
+      return "ok";
+    }
+    function changed() {
+      return { ok: false, error: "STATE_CHANGED", pending: !!st.pendingAction, pendingId: st.pendingAction ? st.pendingAction.id : null, state: st.state };
     }
     function load() {
       var raw = null, old = null;
+      st.reloadNotice = sGet(NOTICE) === "1"; if (st.reloadNotice) sSet(NOTICE, null);
+      st.migrateHeld = sGet(HOLD) === "1";
       try { raw = storage.getItem(LS_KEY); } catch (e) { st.loadError = "READ"; st.saveStatus = "blocked"; return st; }
+      lastRaw = raw;   // 壞掉的存檔也記原文：沒再變就不算外部變更（不會重載循環）
       if (raw !== null) {
         var r = decode(raw, bank);
-        if (r.accepted) { st.state = r.state; lastRaw = raw; } else { st.loadError = r.error; st.saveStatus = "blocked"; }
+        if (r.accepted) { st.state = r.state; } else { st.loadError = r.error; st.saveStatus = "blocked"; }
         return st;
       }
+      if (st.migrateHeld) return st;   // 失效重載：新版被刪了也不自動搬舊版回來（舊版原文不動，等新存檔成功才解除）
       try { old = storage.getItem(LS_V1); } catch (e) { st.loadError = "READ"; st.saveStatus = "blocked"; return st; }
       if (old !== null) {
         var why = v1Problem(old), m = why ? null : migrateV1(old, clock(), bank);
@@ -617,24 +629,31 @@
       }
       return st;
     }
-    // 先把待重試的操作補寫；補不進去就不接受新操作（不讓 tick 之類的操作把它沖掉）
+    // 先把待重試的操作補寫；補不進去就不接受新操作（不讓 tick 之類的操作把它沖掉）。
+    // 存檔已換代（changed）就不補寫：待存操作不跨換代重播，留給畫面明確告訴孩子「這一步需要重做」。
     function flushPending() {
-      if (!st.pendingAction) return true;
-      if (!refresh()) { st.saveStatus = "failed"; return false; }
+      if (!st.pendingAction) return "ok";
+      var f = refresh();
+      if (f !== "ok") { if (f === "fail") st.saveStatus = "failed"; return f; }
       var a = st.pendingAction, r = reduce(st.state, a, env());
-      if (r.error || r.dup) { st.pendingAction = null; return true; }
+      if (r.error || r.dup) { st.pendingAction = null; return "ok"; }   // 磁碟沒換代，跟當初算的一樣：重複或不成立就不必再存
       var w = write(r.state);
-      if (w !== "ok") { st.saveStatus = w; return false; }
+      if (w !== "ok") { st.saveStatus = w; return "fail"; }
       st.state = r.state; st.saveStatus = "ok"; st.pendingAction = null;
-      return true;
+      return "ok";
     }
     function dispatch(action) {
+      if (st.stale) return changed();
       // 先處理既有的待存操作（它自己會先讀磁碟）；補不進去就照舊回 SAVE_PENDING，畫面才會保留原本那筆
       // （Codex 審 2e70601：上一版先 refresh、失敗就回 SAVE_FAILED，畫面把待存換成新的那筆，恢復後重試只存舊的）。
       if (st.pendingAction && !(action && action.id && action.id === st.pendingAction.id)) {
-        if (!flushPending()) return { ok: false, error: "SAVE_PENDING", pendingId: st.pendingAction.id, state: st.state };
+        var fp = flushPending();
+        if (fp === "changed") return changed();
+        if (fp !== "ok") return { ok: false, error: "SAVE_PENDING", pendingId: st.pendingAction.id, state: st.state };
       }
-      if (!refresh()) {   // 磁碟上的最新版讀不到、讀不懂或被刪掉：這次不寫（不拿舊的記憶體狀態蓋掉），有 id 的留著重試
+      var f = refresh();
+      if (f === "changed") return changed();
+      if (f !== "ok") {   // 磁碟讀不到：這次不寫（不拿舊的記憶體狀態蓋掉），有 id 的留著重試
         st.saveStatus = "failed";
         if (action && action.id) st.pendingAction = action;
         return { ok: false, error: "SAVE_FAILED", state: st.state };
@@ -653,17 +672,34 @@
       st.state = r.state; st.saveStatus = "ok"; if (st.pendingAction && st.pendingAction.id === action.id) st.pendingAction = null;
       return { ok: true, info: r.info, state: st.state };
     }
-    function retry() { return st.pendingAction ? dispatch(st.pendingAction) : { ok: true, nothing: true, state: st.state }; }
+    function retry() {
+      if (st.stale) return changed();
+      if (st.pendingAction) return dispatch(st.pendingAction);
+      if (refresh() === "changed") return changed();   // 沒有待存也要檢查失效（T12）
+      return { ok: true, nothing: true, state: st.state };
+    }
+    // storage 事件、切回頁面時呼叫：事件只當通知，一律重讀當下的原文比對（事件可能延後，事件裡的值可能過期）
+    function check() {
+      var f = refresh();
+      return f === "changed" ? changed() : { ok: f === "ok", error: f === "fail" ? "READ" : null, state: st.state };
+    }
+    function invalidate() { st.stale = true; return changed(); }   // 同步程式已經換掉存檔（onReplaced）：不必比對，直接失效
+    function watches(key) { return key === null || key === LS_KEY; }   // clear() 的事件 key 是 null；別站 key、probe 都不理
+    // 孩子按「載入最新紀錄」或自動重載前：明確取消舊的待存操作；在這個分頁記下「重載後提示、新版不存在時不搬舊版」
+    function prepareReload() { st.pendingAction = null; sSet(HOLD, "1"); sSet(NOTICE, "1"); }
     function accepted(id) { return st.state.ops.indexOf(id) >= 0; }   // 畫面只在「這個操作 ID 真的寫進去了」才公布結果
     function discardBroken() {   // 家長明確按「清除並重新開始」：一樣先驗證、寫入成功才公布；v1 原文不動
       if (st.loadError !== "SCHEMA" && st.loadError !== "MIGRATE") return false;
+      if (refresh() !== "ok") return false;   // 壞存檔在這期間被別處換掉了：不蓋掉，讓畫面重載
       var b0 = blankState();
       if (checkState(b0, bank).length) return false;
       try { storage.setItem(LS_KEY, JSON.stringify(b0)); lastRaw = JSON.stringify(b0); } catch (e) { st.saveStatus = "failed"; return false; }
       st.loadError = null; st.migrateReason = null; st.state = b0; st.saveStatus = "ok"; st.pendingAction = null;
+      if (st.migrateHeld) { st.migrateHeld = false; sSet(HOLD, null); }
       return true;
     }
     return { get: function () { return st; }, load: load, dispatch: dispatch, retry: retry, accepted: accepted, discardBroken: discardBroken,
+             check: check, invalidate: invalidate, watches: watches, prepareReload: prepareReload,
              view: function () { return view(st.state, env()); }, env: env };
   }
 
