@@ -412,7 +412,9 @@ def flow_upload(browser, subject, site, bank_global):
     link = pg.locator("#g5upload a[href='https://windsorya.github.io/g5-help/']")
     check(f"補題區 暫停：說明與難題站連結看得見、沒有表單", pg.locator("#g5upload .g5u-msg", has_text="補題區暫停使用").is_visible() and link.count() == 1 and link.is_visible() and pg.locator("#g5upload .g5u-send, #g5upload .g5u-file").count() == 0)   # 審 684ecc8：只比 textContent 會放過 hidden
     pg.wait_for_timeout(500)
-    up_ops = [r for r in sent if r.get("op") != "get"]   # 只有本站同步自己的 op:get 不算；其餘（含 GET、沒有 op 的請求）一律算補題區送出
+    own_key = pg.evaluate("window.G5Core ? G5Core.LS_KEY : null")
+    # 只排除本站同步讀自己的存檔（POST、op:get、key＝本站存檔 key）；其他 deployment、GET、別的 key 一律算補題區送出（審 5630afa）
+    up_ops = [r for r in sent if not ("_method" not in r and r.get("op") == "get" and own_key and r.get("key") == own_key)]
     check(f"補題區 暫停：補題區沒有送出任何請求（除本站同步 op:get 外＝0，含 GET）", not up_ops, up_ops[:2])
     check(f"補題區 沒有水平捲動", no_overflow(pg))
     # 做好了的連結 #c/<觀念id> 直接打開那個觀念；不存在的觀念留在首頁
