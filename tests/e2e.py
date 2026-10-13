@@ -271,11 +271,12 @@ def flow_lab_save_fail(browser, label, device=None):
     n_lines = pg.evaluate("document.querySelectorAll('#labTask .ck').length")
     pg.evaluate("""() => { window.__realSet = Storage.prototype.setItem;
       Storage.prototype.setItem = function () { throw new DOMException('QuotaExceededError', 'QuotaExceededError'); }; }""")
-    for _ in range(2):
-        pg.locator("#mNext").click()
+    pg.locator("#mNext").click()
+    pg.evaluate("() => { const b = document.querySelector('#mNext'); if (b) b.click(); }")   # 4agent 方案 (a)：整頁暫停中再觸發（繞過遮罩）也不前進
     shown_while_failing = pg.locator("#mSteps li").count()
     retry_shown = pg.locator("#retrySave").count() == 1
     pg.evaluate("() => { Storage.prototype.setItem = window.__realSet; }")
+    pg.locator("#retrySave").click()   # 恢復後按遮罩的再試一次補存
     n = 0
     while pg.locator("#mNext").is_visible() and n < 20:
         pg.locator("#mNext").click(); n += 1
@@ -318,12 +319,13 @@ def flow_lab_last_resume(browser, label, device=None):
     pg.locator("#mNext").click()
     failed_shown = pg.locator("#mSteps li").count()
     pg.evaluate(FIX_SET)
-    pg.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+    pg.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")   # 4agent 方案 (a)：暫停中切回分頁只檢查、不補存
+    pg.locator("#retrySave").click()                                               # 補存靠遮罩的再試一次
     if pg.locator("#mNext").is_visible():
         pg.locator("#mNext").click()
     run = pg.evaluate(LAST_RUN)
     st = pg.evaluate("() => document.querySelector('#retrySave') ? 'retry' : 'none'")
-    check(f"{label} 最後一句存檔失敗→恢復→切回分頁補存：每一句都記到、畫面四句都在、完成鈕可按",
+    check(f"{label} 最後一句存檔失敗→恢復→再試一次補存：每一句都記到、畫面四句都在、完成鈕可按",
           failed_shown == n_lines - 1 and run and run["tasksDone"] == list(range(n_lines)) and pg.locator("#mSteps li").count() == n_lines
           and st == "none" and pg.locator("#labDone").is_enabled(),
           {"失敗時句數": failed_shown, "run": run, "畫面句數": pg.locator("#mSteps li").count(), "再存一次": st, "完成鈕": pg.locator("#labDone").is_enabled()})

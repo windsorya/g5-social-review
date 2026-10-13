@@ -6,6 +6,7 @@
 |---|---|---|
 | design-storage-base-20261013.md | 原設計 task-mv6srlue-pujdyl：S0–S3、F1/F2、X1–X4、原 T01–T33 | 46f8cca9d044122a01b8244228018c0e2634566c8cb9d36dbcc0fd16ad6b4c73 |
 | design-storage-resume-20261013.md | 補充設計 task-mv6ujb6v-51m58n：C1–C6、補充 T01–T26 | 0c4586ff0fe28e4020fe3c4f0cbae37279c73ac1b8ba533f83759e774fa0b3fc |
+| design-storage-pause-20261014.md | 4agent 最終方案 (a)：存檔一不正常就整頁暫停，核心只留一筆（K1–K8、U1–U7）；優先於補充設計 C1–C3 的衝突部分 | e94b2a92632bb7a1a699b512ac2dd99480c2a9792b314c714858e993a91405cf |
 
 ## 優先關係
 

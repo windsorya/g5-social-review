@@ -576,15 +576,15 @@ test("18b 啟動前已有出口失敗與 window.claude 舊進度：不呼叫雲�
   assert.deepEqual([st.get().state.exits["1-1"].status, st.get().state.cards.s1.due], ["fail", "2026-10-21"]);
 });
 
-test("27b 存檔失敗後切回頁面（tick）：先補寫待重試的答案，不會被沖掉；畫面以操作 ID 判斷", () => {
+test("27b 存檔失敗後切回頁面（4agent 方案 (a)：tick 也走閘門）：故障中 tick 被拒收（BLOCKED、待存不被沖掉）；恢復後 resume 先補寫待存答案再 tick，只算一次", () => {
   const b = bank(["s1"]); const mem = memStorage(); const clk = { t: NOON(D) };
   const st = mkStore(mem, b, clk);
   mem.setFail(true);
   assert.equal(st.dispatch({ type: "answer", id: "a1", cardId: "s1", ok: true }).ok, false);
-  const t1 = st.dispatch({ type: "tick" });                           // 還寫不進去：tick 也不接受，a1 仍待重試
-  assert.equal(t1.ok, false); assert.equal(st.get().pendingAction.id, "a1"); assert.equal(st.accepted("a1"), false);
+  const t1 = st.dispatch({ type: "tick" });                           // 有待存：tick 一律拒收，a1 仍待重試
+  assert.equal(t1.error, "BLOCKED"); assert.equal(st.get().pendingAction.id, "a1"); assert.equal(st.accepted("a1"), false);
   mem.setFail(false);
-  assert.equal(st.dispatch({ type: "tick" }).ok, true);               // 恢復後 tick 先補寫 a1
+  const r = st.resume(); assert.equal(r.ok, true); assert.equal(r.acceptedId, "a1");   // 恢復後 resume 先補寫 a1
   assert.equal(st.get().pendingAction, null); assert.equal(st.accepted("a1"), true);
   assert.equal(st.get().state.cards.s1.seen, 1);
   assert.equal(st.retry().nothing, true);                             // 沒有待重試的了
@@ -607,9 +607,9 @@ test("28b 設計 task-mv6srlue-pujdyl S0：本站沒有舊版存檔（LS_V1＝nu
   for (const raw of [v1, "{", '{"v":1,"cards":[]}']) {
     const mem = memStorage({ [pre + ".none"]: raw, "null": raw, [C.LS_KEY + ".fromV1"]: "1", [C.LS_KEY + ".noMigrate"]: "1" });
     const st = mkStore(mem, b, { t: NOON(D) });
-    assert.deepEqual([st.get().loadError, st.get().migrated, st.get().legacy, mem.writes()], [null, false, null, 0], raw);
+    assert.deepEqual([st.get().loadError, st.get().migrated, st.get().legacy || null, mem.writes()], [null, false, null, 0], raw);
     assert.equal(mem.raw[C.LS_KEY], undefined, raw);
-    assert.equal(st.restoreLegacy("restore").error, "NOTHING", raw); assert.equal(st.retryArchive().error, "NOTHING", raw); assert.equal(mem.writes(), 0, raw);
+    assert.equal(typeof st.restoreLegacy, "undefined", raw); assert.equal(typeof st.retryArchive, "undefined", raw); assert.equal(mem.writes(), 0, raw);   // 4agent 方案 (a) K1：舊版函式已刪
     assert.ok(st.dispatch({ type: "answer", id: "a" + raw.length, cardId: "s1", ok: true }).ok, raw);
     assert.deepEqual(Object.keys(JSON.parse(mem.raw[C.LS_KEY]).cards), ["s1"], raw);
   }
@@ -633,15 +633,15 @@ test("Q1 每日新卡額度：10/18 前診斷期最多 10 張，之後 5 張（�
 });
 
 /* ---------- Codex 第 2 輪（設計後）缺陷的回歸測試 ---------- */
-test("D1 store：A 待重試時送 B 被拒（SAVE_PENDING），恢復後 A 先寫、B 再送才成功，不會丟 B", () => {
+test("D1 store（4agent 方案 (a)）：A 待重試時送 B 被拒收（BLOCKED、零寫入、待存仍是 A）；恢復後 resume 補寫 A，B 再送才成功，不會丟 A", () => {
   const b = bank(["s1", "s2"]); const mem = memStorage(); const st = mkStore(mem, b, { t: NOON(D) });
   mem.setFail(true);
   st.dispatch({ type: "answer", id: "A", cardId: "s1", ok: true });
   mem.setFail(false);
-  mem.setFail(true);
+  const w0 = mem.writes();
   const rb = st.dispatch({ type: "answer", id: "B", cardId: "s2", ok: true });
-  assert.deepEqual([rb.ok, rb.error, st.get().pendingAction.id], [false, "SAVE_PENDING", "A"]);
-  mem.setFail(false);
+  assert.deepEqual([rb.ok, rb.error, st.get().pendingAction.id, mem.writes()], [false, "BLOCKED", "A", w0]);
+  assert.ok(st.resume().ok);
   assert.equal(st.dispatch({ type: "answer", id: "B", cardId: "s2", ok: true }).ok, true);
   assert.deepEqual([st.accepted("A"), st.accepted("B")], [true, true]);
 });
@@ -831,16 +831,17 @@ function flakyStorage() {
            setItem: (k, v) => { if (writeFail) throw new Error("QuotaExceeded"); m[k] = v; }, removeItem: (k) => { delete m[k]; },
            setRead: (f) => { readFail = f; }, setWrite: (f) => { writeFail = f; }, raw: m };
 }
-test("M4 已有待存操作 A，讀取又失敗時送出 B：回 READ（補充設計 C2 校正，原期待 SAVE_PENDING 掩蓋了讀取失敗）、待存仍是 A；恢復後重試 A 成功、再送 B 成功", () => {
+test("M4（4agent 方案 (a)）已有待存操作 A、讀取又失敗時送出 B：被拒收（BLOCKED、待存仍是 A，不讀不寫）；恢復後 resume 補寫 A、再送 B 成功", () => {
   const b = bank(["s1", "s2"]); const mem = flakyStorage();
   const S = C.createStore({ storage: mem, bank: b, clock: () => NOON(D) }); S.load();
   const A = op("answer", { cardId: "s1", ok: true }), B = op("answer", { cardId: "s2", ok: true });
   mem.setWrite(true); assert.equal(S.dispatch(A).ok, false); mem.setWrite(false);
   mem.setRead(true);
   const r = S.dispatch(B);
-  assert.equal(r.error, "READ"); assert.equal(r.pendingId, A.id); assert.equal(S.get().pendingAction.id, A.id);
+  assert.equal(r.error, "BLOCKED"); assert.equal(r.pendingId, A.id); assert.equal(S.get().pendingAction.id, A.id);
+  assert.equal(S.resume().error, "READ", "讀不到時 resume 回 READ");
   mem.setRead(false);
-  assert.ok(S.retry().ok); assert.ok(S.accepted(A.id));
+  assert.ok(S.resume().ok); assert.ok(S.accepted(A.id));
   assert.ok(S.dispatch(B).ok); assert.ok(S.accepted(B.id));
 });
 test("M5 別處把存檔整個刪掉後，這個分頁不得把舊紀錄寫回去", () => {
