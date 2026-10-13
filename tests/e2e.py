@@ -289,6 +289,78 @@ def flow_lab_save_fail(browser, label, device=None):
     ctx.close()
 
 
+BREAK_SET = """() => { window.__realSet = Storage.prototype.setItem;
+  Storage.prototype.setItem = function () { throw new DOMException('QuotaExceededError', 'QuotaExceededError'); }; }"""
+FIX_SET = "() => { Storage.prototype.setItem = window.__realSet; }"
+LAST_RUN = """() => { const s = JSON.parse(localStorage.getItem('g5soc.v1') || 'null'); if (!s) return null;
+  const ids = Object.keys(s.labRuns || {}); const r = s.labRuns[ids[ids.length - 1]];
+  return r ? {id: ids[ids.length - 1], n: ids.length, tasksDone: r.tasksDone.slice().sort(), tasks: r.tasks} : null; }"""
+
+
+def enter_lab(pg):
+    pg.locator("#goAll").click(); pg.wait_for_selector("#main .q")
+    answer(pg, False)
+    pg.locator('#errq button[data-k="concept"]').click(); pg.wait_for_selector("#remedy")
+    pg.locator("#toLab").click(); pg.wait_for_selector("#labPredict button[data-g]")
+    pg.locator("#labPredict button[data-g]").first.click()
+    pg.wait_for_selector("#mNext")
+    return pg.evaluate("document.querySelectorAll('#labTask .ck').length")
+
+
+def flow_lab_last_resume(browser, label, device=None):
+    """Codex 審 e195ef98 #1：最後一句存檔失敗→恢復→切回分頁（visibilitychange 補存）→再按下一句，
+    舊版 check() 見 tasksDone 已有這一句就直接 return true、不重繪，完成鈕一直停用。應該：補存後完成鈕可按。"""
+    ctx, pg, errors = open_page(browser, device)
+    n_lines = enter_lab(pg)
+    for _ in range(n_lines - 1):
+        pg.locator("#mNext").click()
+    pg.evaluate(BREAK_SET)
+    pg.locator("#mNext").click()
+    failed_shown = pg.locator("#mSteps li").count()
+    pg.evaluate(FIX_SET)
+    pg.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+    if pg.locator("#mNext").is_visible():
+        pg.locator("#mNext").click()
+    run = pg.evaluate(LAST_RUN)
+    st = pg.evaluate("() => document.querySelector('#retrySave') ? 'retry' : 'none'")
+    check(f"{label} 最後一句存檔失敗→恢復→切回分頁補存：每一句都記到、畫面四句都在、完成鈕可按",
+          failed_shown == n_lines - 1 and run and run["tasksDone"] == list(range(n_lines)) and pg.locator("#mSteps li").count() == n_lines
+          and st == "none" and pg.locator("#labDone").is_enabled(),
+          {"失敗時句數": failed_shown, "run": run, "畫面句數": pg.locator("#mSteps li").count(), "再存一次": st, "完成鈕": pg.locator("#labDone").is_enabled()})
+    if pg.locator("#labDone").is_enabled():
+        pg.locator("#labDone").click()
+    check(f"{label} 補存後按完成，回到練習換一題確認", pg.locator("#main .q").count() == 1, pg.locator("#main").inner_text()[:120])
+    check(f"{label} 最後一句補存流程沒有 JS 錯誤", not errors, errors)
+    ctx.close()
+
+
+def flow_lab_retry_resume(browser, label, device=None):
+    """Codex 審 e195ef98 #2：第二句存檔失敗→恢復→按上方「再存一次」，舊版存成功後呼叫 route()，
+    screen="lab" 被導回首頁、lab=null，只能重開一輪。應該：留在原本那一輪，第二句接著出現，同一個 runId 做到完。"""
+    ctx, pg, errors = open_page(browser, device)
+    n_lines = enter_lab(pg)
+    pg.locator("#mNext").click()
+    pg.evaluate(BREAK_SET)
+    pg.locator("#mNext").click()
+    before = pg.evaluate(LAST_RUN)
+    pg.evaluate(FIX_SET)
+    pg.locator("#retrySave").click()
+    after = pg.evaluate(LAST_RUN)
+    still_lab = pg.locator("#labPredict").count() == 1 and pg.locator("#mNext").count() == 1
+    check(f"{label} 「再存一次」成功後留在原本的一句一句看懂，第二句接著出現",
+          still_lab and pg.locator("#mSteps li").count() == 2 and after and after["tasksDone"] == [0, 1] and pg.locator("#retrySave").count() == 0,
+          {"還在學習畫面": still_lab, "畫面句數": pg.locator("#mSteps li").count(), "run": after, "main": pg.locator("#main").inner_text()[:80]})
+    n = 0
+    while still_lab and pg.locator("#mNext").is_visible() and n < 20:
+        pg.locator("#mNext").click(); n += 1
+    end = pg.evaluate(LAST_RUN)
+    ok_end = bool(still_lab and end and before and end["id"] == before["id"] and end["n"] == before["n"]
+                  and end["tasksDone"] == list(range(n_lines)) and pg.locator("#labDone").is_enabled())
+    check(f"{label} 「再存一次」後續接同一輪（同一個 runId、沒有多開一輪）做到完、完成鈕可按", ok_end, {"before": before, "end": end})
+    check(f"{label} 「再存一次」續接流程沒有 JS 錯誤", not errors, errors)
+    ctx.close()
+
+
 def flow_review(browser):
     ctx, pg, errors = open_page(browser)
     check("小考複習按鈕寫「第 2 單元 臺灣的自然環境與生活」", "第 2 單元 臺灣的自然環境與生活" in pg.locator("#main .review").inner_text(), pg.locator("#main .review").inner_text()[:200])
@@ -306,6 +378,8 @@ def main():
         if BASE.startswith("https:"):
             flow_video_live(cr, "線上Chromium")
         flow_lab_save_fail(cr, "桌機", {"viewport": {"width": 1280, "height": 900}})
+        flow_lab_last_resume(cr, "桌機", {"viewport": {"width": 1280, "height": 900}})
+        flow_lab_retry_resume(cr, "桌機", {"viewport": {"width": 1280, "height": 900}})
         flow_main(cr, "桌機", {"viewport": {"width": 1280, "height": 900}})
         flow_main(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True, "device_scale_factor": 2})
         flow_concepts(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True})

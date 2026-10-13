@@ -2091,7 +2091,15 @@ function retrySave(){
   var rr=store.retry(); banners();
   var f=$("#saveFail");
   if(f&&pending){ if(store.accepted(pending.a.id)){f.remove();feedback(pending,(rr&&rr.info)||{});} return; }
-  if(rr.ok) route();
+  if(rr.ok){ if(!labRefresh()) route(); }
+}
+// 補存成功後，如果她還在同一輪「一句一句看懂」，就留在原畫面續接（Codex 審 e195ef98：route() 會把 screen="lab" 導回首頁、只能重開一輪）
+// 回傳 true＝已在原畫面重繪；false＝不在學習畫面（或這一輪不在紀錄裡），交給 route()
+function labRefresh(){
+  if(screen!=="lab"||!lab||!run()) return false;
+  if(lab.sync) lab.sync();
+  drawPredict(); drawTasks(); drawNav();
+  return true;
 }
 function feedback(p,info){
   var c=p.c, ok=p.ok, shaky=ok&&(p.m.unsure||p.m.hint), box=$("#ansBox");
@@ -2286,7 +2294,8 @@ function check(i){
   if(!lab) return false;
   var rr=run();
   if(!rr||rr.phase==="predict") return false;
-  if(rr.tasksDone.indexOf(i)>=0) return true;
+  // Codex 審 e195ef98：這一句是之前補存進去的（visibilitychange／再存一次），也要重繪任務與完成鈕，不然完成鈕一直停用
+  if(rr.tasksDone.indexOf(i)>=0){drawTasks();drawNav();if(rr.tasksDone.length>=rr.tasks)drawPredict();return true;}
   var r=act({type:"labTask",runId:lab.runId,task:i});
   if(r.ok){drawTasks();drawNav();if(run().tasksDone.length>=run().tasks)drawPredict();}
   return !!(r.ok||r.dup);
@@ -2316,6 +2325,8 @@ LABS.soc=function(box){
   }
   // 存檔成功（ok 或 dup）才前進；失敗就留在這一句，上方出現「再存一次」，再按「下一句」也會重試同一句
   on("#mNext",function(){if(shown<ex.lines.length&&check(shown)){shown++;draw();}});
+  // 補存成功後：已存進去的句子都顯示出來（畫面句數＝存到的句數），接著看下一句
+  lab.sync=function(){var rr=run();while(shown<ex.lines.length&&rr.tasksDone.indexOf(shown)>=0)shown++;draw();};
   draw();
 };
 
@@ -2394,7 +2405,7 @@ document.addEventListener("visibilitychange",function(){
   var changed=V().today!==shownDay; act({type:"tick"});
   if(changed){ if(screen==="practice") route(); else renderHome(); renderSide(); }
   else if(screen==="home") renderHome();
-  else renderSide();
+  else { if(screen==="lab") labRefresh(); renderSide(); }
 });
 renderHome();
 })();
