@@ -102,3 +102,117 @@ test("⑩不寫具體條號（題目、選項、解說都不出現「第 N 條�
   const bad = B.CARDS.filter((c) => /第\s*[0-9０-９一二三四五六七八九十百]+\s*條/.test([c.q, c.why, c.hint].concat(c.opts, c.wrongWhy).join(" "))).map((c) => c.id);
   assert.deepEqual(bad, []);
 });
+
+// ---------- 2026-10-13 Codex 審 ddd5a2e7 三項內容 FAIL（a06 經緯度、c04 法律與道德、g05 月均溫推極端）的守門 ----------
+// 「說成真的」的文字：題目、正解、解說、提示、錯誤選項的解說、出口題與參考答案、觀念解說（含圖上文字）、先想想看的題目／正解／解說。
+// 錯誤選項本身與先想想看的錯誤選項故意是錯的，不掃。
+function claimTexts() {
+  const out = [];
+  const strip = (s) => String(s || "").replace(/<[^>]*>/g, " ").replace(/&[a-z#0-9]+;/g, " ");
+  B.CARDS.forEach((c) => {
+    [c.q, c.ans, c.why, c.hint].forEach((t) => out.push([c.id, t]));
+    c.wrongWhy.forEach((w, i) => { if (i !== c.a) out.push([c.id + "「" + c.opts[i] + "」的解說", w]); });
+  });
+  CIDS.forEach((k) => {
+    out.push([k + " 出口題", B.CONCEPTS[k].exit]); out.push([k + " 參考答案", B.CONCEPTS[k].exitAns]);
+    X.EXPLAIN[k].forEach((ex, j) => {
+      [ex.name, ex.task, ex.ask].concat(ex.lines).forEach((t) => out.push([k + " 說法" + (j + 1), t]));
+      out.push([k + " 說法" + (j + 1) + " 圖", strip(ex.svg())]);
+    });
+    const p = X.PREDICT[k]; [p.q, p.opts[p.a], p.why].forEach((t) => out.push([k + " 先想想看", t]));
+  });
+  return out.filter((x) => typeof x[1] === "string" && x[1]);
+}
+
+// FACTCHECK.md 的 ey_extreme（內政部臺灣本島極點）＝經緯度數字的唯一依據
+function extremes() {
+  const md = fs.readFileSync(path.join(__dirname, "FACTCHECK.md"), "utf8");
+  const g = (name) => {
+    const m = new RegExp(name + "\\s*(\\d+)度(\\d+)分(\\d+)秒").exec(md);
+    assert.ok(m, "FACTCHECK.md 找不到「" + name + "」");
+    return +m[1] + +m[2] / 60 + +m[3] / 3600;
+  };
+  return { E: g("極東"), W: g("極西"), S: g("極南"), N: g("極北") };
+}
+// 不是在講臺灣本島範圍的固定緯度（出處：教育部辭典赤道 0 度、行政院北回歸線 23.5 度）
+const REF_LAT = [0, 23.5];
+const GEO = /(北緯|南緯|東經|西經)\s*(\d+(?:\.\d+)?)(?:\s*(?:～|~|到|至)\s*(\d+(?:\.\d+)?))?\s*度(以上|以下|以北|以南|以東|以西|多)?/g;
+
+function geoProblems(text, X0) {
+  const bad = [];
+  let m; GEO.lastIndex = 0;
+  while ((m = GEO.exec(text))) {
+    const [all, kind, a0, b0, suf] = m, a = +a0, b = b0 === undefined ? null : +b0;
+    const lat = kind === "北緯" || kind === "南緯";
+    if (kind === "南緯" || kind === "西經") { bad.push(all + "（臺灣是北緯、東經）"); continue; }
+    const lo = lat ? X0.S : X0.W, hi = lat ? X0.N : X0.E;
+    if (b !== null) {   // 範圍：兩端要等於極點四捨五入後的整數
+      if (a !== Math.round(lo) || b !== Math.round(hi)) bad.push(all + "（極點 " + lo.toFixed(3) + "～" + hi.toFixed(3) + "）");
+    } else if (suf === "以上" || suf === "以北" || suf === "以東") {
+      if (!(a <= lo)) bad.push(all + "（本島最" + (lat ? "南" : "西") + "只到 " + lo.toFixed(3) + " 度）");
+    } else if (suf === "以下" || suf === "以南" || suf === "以西") {
+      if (!(a >= hi)) bad.push(all + "（本島最" + (lat ? "北" : "東") + "到 " + hi.toFixed(3) + " 度）");
+    } else if (suf === "多") {
+      if (!(Math.floor(lo) >= a && hi < a + 10)) bad.push(all + "（極點 " + lo.toFixed(3) + "～" + hi.toFixed(3) + "）");
+    } else if (!(lat && REF_LAT.indexOf(a) >= 0)) {   // 單一數字（如「最南約北緯 22 度」、圖上的格線「北緯 24 度」）：要落在本島範圍內（容許四捨五入 0.5 度）
+      if (!(a >= lo - 0.5 && a <= hi + 0.5)) bad.push(all + "（本島範圍 " + lo.toFixed(3) + "～" + hi.toFixed(3) + "）");
+    }
+  }
+  return bad;
+}
+
+test("⑪經緯度數字說法都和 FACTCHECK 內政部極點一致（a06「北緯 22 度以上」錯：極南 21°53′50″）", () => {
+  const X0 = extremes();
+  assert.ok(X0.S < 22 && X0.S > 21.8, "極南應約 21.897 度：" + X0.S);
+  // 判準自檢：抓得到 Codex 的反例，合法說法不誤判
+  assert.deepEqual(geoProblems("臺灣在北緯 22 度以上。", X0).length, 1);
+  assert.deepEqual(geoProblems("臺灣大約在東經 120 到 122 度、北緯 22 到 25 度。最南約北緯 22 度，北回歸線約北緯 23.5 度。臺灣在東經 120 多度。", X0), []);
+  assert.deepEqual(geoProblems("北緯 21 度以上", X0), []);
+  assert.equal(geoProblems("北緯 32～35 度", X0).length, 1);
+  assert.equal(geoProblems("北緯 30 度", X0).length, 1);
+  const bad = [];
+  claimTexts().forEach(([who, t]) => geoProblems(t, X0).forEach((p) => bad.push(who + "：" + p)));
+  assert.deepEqual(bad, []);
+});
+
+test("⑫不把法律和道德切割（c04「交通規則…和良心無關」錯：同一件事可以同時是法律也是道德）", () => {
+  const SPLIT = /(法律|交通規則|規則|法規)[^。；！？]*?(和|與|跟)(良心|道德)[^。；！？]*?(無關|沒有關係|沒關係|不相干)/;
+  assert.ok(SPLIT.test("交通規則是法律的一部分，和良心無關。"), "判準自檢：要抓得到 c04 舊說法");
+  assert.ok(!SPLIT.test("校規是學校訂的，和教義無關。"), "判準自檢：不誤判和法律道德無關的句子");
+  const bad = claimTexts().filter(([, t]) => SPLIT.test(t)).map(([who, t]) => who + "：" + t);
+  assert.deepEqual(bad, []);
+});
+
+test("⑬平均氣溫不拿來推極端天氣（g05「均溫 16.4 度，不會下大雪」錯：平均值推不出某天不會發生）", () => {
+  const sent = (t) => String(t).split(/[。！？；]/);
+  const MEAN_TO_EXTREME = /(均溫|平均氣溫|平均溫度)[^。！？；]*?(不會|一定|絕不|從來|永遠)/;
+  const NEVER_SNOW = /不會下(大)?雪|從來不下雪|不可能下雪/;
+  assert.ok(MEAN_TO_EXTREME.test("臺北 1 月均溫 16.4 度，不會下大雪"), "判準自檢：要抓得到 g05 舊說法");
+  const bad = [];
+  claimTexts().forEach(([who, t]) => sent(t).forEach((s) => { if (MEAN_TO_EXTREME.test(s) || NEVER_SNOW.test(s)) bad.push(who + "：" + s); }));
+  assert.deepEqual(bad, []);
+});
+
+// ---------- 影片外開連結（Codex 審 ddd5a2e7：RKRvSGuU_cw 只取 76–236 秒，「在 YouTube 開啟」只帶 t=76，管不到結束） ----------
+// 做法：有 end（只取一段）的影片不給外開連結，只留站內播放器（嵌入網址帶 start＋end，到 end 會停）。
+// 不改用嵌入網址當外開連結：YouTube 嵌入頁直接開（不在 iframe 裡、沒有來源網址）會顯示「錯誤 153」，見 DevVault 2026-10-11 YouTube 錯誤 153。
+test("⑭有截段（end）的影片不給「在 YouTube 開啟」；沒有截段的才給，且只帶開始秒數", () => {
+  const html = fs.readFileSync(path.join(__dirname, "..", "src", "app.html"), "utf8");
+  const m = /function mmss\(s\)\{[^\n]*\}\n/.exec(html), f = /function videoBlock\(tp\)\{[\s\S]*?\n\}\n/.exec(html);
+  assert.ok(m && f, "src/app.html 找不到 mmss／videoBlock");
+  const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const V = require("../src/socvideos.js");
+  const run = (vids) => new Function("window", "G5_VIDEOS", "esc", m[0] + f[0] + "return videoBlock('k');")({ G5_VIDEOS: { k: vids } }, { k: vids }, esc);
+  const all = [];
+  Object.keys(V).forEach((k) => (Array.isArray(V[k]) ? V[k] : []).forEach((v) => all.push(v)));
+  assert.ok(all.some((v) => v.id === "RKRvSGuU_cw" && v.end === 236), "socvideos.js 應有 RKRvSGuU_cw 76–236");
+  const bad = [];
+  all.forEach((v) => {
+    const h = run([v]), links = h.match(/href="[^"]*youtube\.com[^"]*"/g) || [];
+    if (v.end && links.length) bad.push(v.id + " 有 end=" + v.end + " 卻有外開連結：" + links.join(" "));
+    if (!/data-play="/.test(h) || (v.end && h.indexOf('data-end="' + v.end + '"') < 0)) bad.push(v.id + " 站內播放按鈕沒帶 end");
+  });
+  const h0 = run([{ id: "abcdefghijk", title: "t", channel: "c", start: 30 }]);
+  if (!/href="https:\/\/www\.youtube\.com\/watch\?v=abcdefghijk&amp;t=30"|href="https:\/\/www\.youtube\.com\/watch\?v=abcdefghijk&t=30"/.test(h0)) bad.push("沒有 end 的影片應該保留外開連結（帶 t=開始秒）：" + h0);
+  assert.deepEqual(bad, []);
+});

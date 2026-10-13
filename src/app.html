@@ -638,7 +638,9 @@ function videoBlock(tp){
     var st=v.start||0, len=v.end?Math.max(1,Math.round((v.end-st)/60)):null;
     return '<div class="vid"><button class="btn ghost" type="button" data-play="'+esc(v.id)+'" data-start="'+st+'" data-end="'+(v.end||"")+'">播放：'+esc(v.title)+'</button>'+
       '<span class="small muted">'+esc(v.channel)+(st?'・從 '+mmss(st)+' 開始':'')+(len?'・約 '+len+' 分鐘':'')+(v.note?'・'+esc(v.note):'')+
-      '・<a href="https://www.youtube.com/watch?v='+encodeURIComponent(v.id)+(st?'&t='+st:'')+'" target="_blank" rel="noopener">在 YouTube 開啟</a></span></div>';
+      // 有 end（只取驗證過的一段）就不給外開連結：YouTube 網頁管不到結束秒數，會播到沒核實或有錯的後段（Codex 審 ddd5a2e7：RKRvSGuU_cw 236 秒後有錯）。
+      // 不改用 embed 網址外開：嵌入頁直接開、沒有來源網址會顯示「錯誤 153」（DevVault 2026-10-11）。站內播放器帶 start＋end，到 end 就停。
+      (v.end?'・只播這一段':'・<a href="https://www.youtube.com/watch?v='+encodeURIComponent(v.id)+(st?'&t='+st:'')+'" target="_blank" rel="noopener">在 YouTube 開啟</a>')+'</span></div>';
   }).join("")+'</div>';
 }
 function wireVideos(box){
@@ -773,12 +775,16 @@ function drawTasks(){
   var rr=run();
   $("#labTask").innerHTML='<strong>任務</strong>'+lab.tasks.map(function(t,i){var d=rr.tasksDone.indexOf(i)>=0;return '<div class="ck'+(d?' got':'')+'">'+checkIcon(d)+'<span>'+esc(t)+'</span></div>';}).join("");
 }
+// 回傳 true＝這一步已經存進這台裝置（這次存成功、重複的操作，或之前就記過）；畫面只有在 true 時才往下走
+// （Codex 審 ddd5a2e7：「一句一句看懂」不論存檔成功與否都前進，恢復後 tasksDone 缺號、完成鈕停用、又沒有待重試的操作）
 function check(i){
-  if(!lab) return;
+  if(!lab) return false;
   var rr=run();
-  if(!rr||rr.phase==="predict"||rr.tasksDone.indexOf(i)>=0) return;
+  if(!rr||rr.phase==="predict") return false;
+  if(rr.tasksDone.indexOf(i)>=0) return true;
   var r=act({type:"labTask",runId:lab.runId,task:i});
   if(r.ok){drawTasks();drawNav();if(run().tasksDone.length>=run().tasks)drawPredict();}
+  return !!(r.ok||r.dup);
 }
 function drawNav(){
   var rr=run(), all=rr.prediction!==null&&rr.tasksDone.length>=rr.tasks, nav=$("#labNav");
@@ -803,7 +809,8 @@ LABS.soc=function(box){
     $("#mSteps").innerHTML=ex.lines.slice(0,shown).map(function(t,i){return '<li class="step" style="grid-template-columns:1fr"><div class="say"><b class="n">'+(i+1)+'</b><p>'+esc(t)+'</p></div></li>';}).join("");
     $("#mNext").hidden=shown>=ex.lines.length;
   }
-  on("#mNext",function(){if(shown<ex.lines.length){check(shown);shown++;draw();}});
+  // 存檔成功（ok 或 dup）才前進；失敗就留在這一句，上方出現「再存一次」，再按「下一句」也會重試同一句
+  on("#mNext",function(){if(shown<ex.lines.length&&check(shown)){shown++;draw();}});
   draw();
 };
 

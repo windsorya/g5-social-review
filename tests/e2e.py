@@ -4,6 +4,7 @@
 用 python3.12 執行：python3.12 tests/e2e.py [--base https://windsorya.github.io/g5-social-review/]
 題目答案從頁面上的 window.G5SocBank 依題目文字查（題庫本身另有 tests/socbank.test.js 檢查）。"""
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -113,6 +114,10 @@ def flow_concepts(browser, label, device=None):
         ok = ok and second != first and pg.locator("#main .remedy svg.fig").count() == 1 and pg.locator("#main .remedy li").count() >= 2
         has_vid = pg.evaluate("(k)=>Array.isArray(G5_VIDEOS[k])&&G5_VIDEOS[k].length>0", cid)
         ok = ok and (pg.locator("#main .vids button[data-play]").count() >= 1) == has_vid   # #1335：有驗證過的影片就要看得到；寫 noVideoReason 的不顯示
+        # Codex 審 ddd5a2e7：有截段（end）的影片不給外開 YouTube 連結（外開管不到結束秒數，會播到沒核實／有錯的後段）
+        n_open = pg.locator('#main .vids a[href*="youtube.com"]').count()
+        n_free = pg.evaluate("(k)=>(G5_VIDEOS[k]||[]).filter(function(v){return !v.end;}).length", cid) if has_vid else 0
+        ok = ok and n_open == n_free
         if not ok or not no_overflow(pg):
             bad.append(cid)
         pg.locator("#cBack").click(); pg.wait_for_selector("#concepts .ccard")
@@ -121,25 +126,166 @@ def flow_concepts(browser, label, device=None):
     ctx.close()
 
 
+# ---------- 影片真的在播（照數學站 g5-math-review tests/e2e.py b1ae271 的 player_problem／flow_video_live） ----------
+# Codex 審 ddd5a2e7：舊版捕捉讀取例外後只把文字設成「<讀不到…>」，再查有沒有「153」字樣——inner_text() 拋 TimeoutError 也判 PASS。
+# 播放器畫面出現這些字＝不能播（YouTube 嵌入錯誤頁；英文介面與中文介面都列）。比對時不分大小寫。
+PLAYER_ERROR_MARKS = ("video unavailable", "this video is private", "private video", "error 153", "錯誤 153",
+                      "無法播放", "影片無法觀看", "私人影片", "an error occurred", "發生錯誤",
+                      "sign in to confirm", "登入以確認")
+# 讀播放器 iframe 裡的真實狀態：正常播放時 body 文字常是空的（數學站 2026-10-13 正式網址實測），所以看 <video> 元素。
+PLAYER_STATE_JS = """b => { const v = b.querySelector('video'), e = b.querySelector('.ytp-error');
+  return {text: (b.innerText || '').trim().slice(0, 200), hasVideo: !!v, t: v ? v.currentTime : null, paused: v ? v.paused : null,
+          err: e ? (e.innerText || 'ytp-error').trim().slice(0, 120) : ''}; }"""
+PLAY_GAP_MS = 2000        # 兩次讀狀態之間隔多久
+PLAY_MIN_ADVANCE = 0.5    # 隔 PLAY_GAP_MS 後 currentTime 至少要多這麼多秒，才算真的在播
+
+
+def player_problem(src, rp, read_state, wait):
+    """判斷一個嵌入播放器是不是真的在播；回傳問題說明，在播回傳 None。
+    read_state() 回傳 {text, hasVideo, t, paused, err}；先讀一次、wait()（約 2 秒）、再讀一次：
+    兩次都要讀得到（讀取例外＝失敗）、有 <video>、沒有錯誤畫面；第二次 paused=false，且 currentTime 比第一次多 ≥ PLAY_MIN_ADVANCE 秒。"""
+    if "youtube-nocookie.com/embed/" not in (src or ""):
+        return f"iframe 沒指向 youtube-nocookie：{src}"
+    if rp != "strict-origin-when-cross-origin":
+        return f"referrerpolicy 不對：{rp}"
+    states = []
+    for k in (1, 2):
+        if k == 2:
+            wait()
+        try:
+            st = read_state()
+        except Exception as e:  # noqa: BLE001 — 任何讀取失敗都是播放失敗
+            return f"第 {k} 次讀不到播放器內容（{type(e).__name__}：{str(e)[:60]}）"
+        if not isinstance(st, dict):
+            return f"第 {k} 次讀到的播放器狀態讀不懂：{st!r}"[:120]
+        low = (str(st.get("text") or "") + " " + str(st.get("err") or "")).lower()
+        hit = next((m for m in PLAYER_ERROR_MARKS if m.lower() in low), None)
+        if st.get("err") or hit:
+            return f"第 {k} 次讀：播放器顯示錯誤（{hit or st.get('err')}）"
+        if not st.get("hasVideo"):
+            return f"第 {k} 次讀：播放器裡沒有 <video>（沒有載入影片）"
+        states.append(st)
+    t1, t2 = states[0].get("t"), states[1].get("t")
+    if not all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in (t1, t2)):
+        return f"讀不到播放時間（t={t1}→{t2}）"
+    if states[1].get("paused") is not False:
+        return f"第二次讀時影片沒有在播（paused={states[1].get('paused')}、t={t2}）"
+    if t2 - t1 < PLAY_MIN_ADVANCE:
+        return f"影片沒有往前播（隔約 {PLAY_GAP_MS / 1000:g} 秒，t {t1}→{t2}，只多 {t2 - t1:.2f} 秒，至少要 {PLAY_MIN_ADVANCE}）"
+    return None
+
+
+def selftest_player():
+    """播放判準的替身測試（不開瀏覽器）：餵假的兩次狀態序列，斷言判對；也斷言兩次讀之間真的有等（呼叫順序 讀→等→讀）。
+    含 Codex 審 ddd5a2e7 的反例：讀取（inner_text／evaluate）拋 TimeoutError 必須判失敗。"""
+    ok_src, ok_rp = "https://www.youtube-nocookie.com/embed/RKRvSGuU_cw?start=76&end=236", "strict-origin-when-cross-origin"
+
+    def st(**kw):
+        return dict({"text": "", "hasVideo": True, "t": 76.0, "paused": False, "err": ""}, **kw)
+    boom = TimeoutError("Locator.inner_text: Timeout 10000ms exceeded.")
+    cases = [  # (說明, 兩次狀態（例外＝讀時丟出）, 應判在播?)
+        ("Codex 反例：inner_text 第一次就拋 TimeoutError", [boom, boom], False),
+        ("第二次讀拋 TimeoutError", [st(t=76), boom], False),
+        ("第一次讀拋 TimeoutError、第二次正常", [boom, st(t=78)], False),
+        ("停在起點 {t:76, paused:true}", [st(t=76, paused=True), st(t=76, paused=True)], False),
+        ("{paused:false, t:0} 沒前進", [st(t=0), st(t=0)], False),
+        ("正常在播：76→78.1", [st(t=76), st(t=78.1)], True),
+        ("剛好前進 0.5 秒", [st(t=76), st(t=76.5)], True),
+        ("第二次暫停（雖然時間有前進）", [st(t=76), st(t=78, paused=True)], False),
+        ("第二次 paused=None（讀不到）", [st(t=76), st(t=78, paused=None)], False),
+        ("只前進 0.3 秒（緩衝中）", [st(t=76), st(t=76.3)], False),
+        ("時間倒退", [st(t=80), st(t=76)], False),
+        ("第一次 paused=true、第二次在播且前進", [st(t=76, paused=True), st(t=77.9)], True),
+        ("錯誤 153 畫面", [st(text="影片播放器設定錯誤 錯誤 153"), st(t=78)], False),
+        ("第二次出現 Video unavailable", [st(t=76), st(t=78, text="Video unavailable. This video is private.")], False),
+        ("第一次有 .ytp-error", [st(err="ytp-error"), st(t=78)], False),
+        ("Sign in to confirm you're not a bot", [st(text="Sign in to confirm you're not a bot"), st(t=78)], False),
+        ("沒有 <video>", [st(hasVideo=False, t=None, paused=None), st(hasVideo=False, t=None, paused=None)], False),
+        ("t 是 None", [st(t=None), st(t=None)], False),
+        ("t 是字串", [st(t="76"), st(t="78")], False),
+        ("狀態不是 dict（例如 inner_text 回字串）", ["", st(t=78)], False),
+    ]
+    wrong = []
+    for name, seq, want in cases:
+        log, it = [], iter(seq)
+
+        def read():
+            log.append("讀"); x = next(it)
+            if isinstance(x, Exception):
+                raise x
+            return x
+        got = player_problem(ok_src, ok_rp, read, lambda: log.append("等")) is None
+        if got != want:
+            wrong.append(f"{name}：應判{'在播' if want else '沒在播'}，判成{'在播' if got else '沒在播'}")
+        if want and log != ["讀", "等", "讀"]:
+            wrong.append(f"{name}：呼叫順序應為 讀→等→讀，實際 {log}")
+    if player_problem("https://www.youtube.com/embed/RKRvSGuU_cw", ok_rp, lambda: st(), lambda: None) is None:
+        wrong.append("iframe 不是 youtube-nocookie 卻判在播")
+    if player_problem(ok_src, "no-referrer", lambda: st(), lambda: None) is None:
+        wrong.append("referrerpolicy 錯卻判在播")
+    check(f"播放判準替身測試：{len(cases) + 2} 個假狀態序列都判對（含 inner_text 拋 TimeoutError 要判失敗）", not wrong, wrong)
+
+
 def flow_video_live(browser, label, device=None):
-    """只在線上版跑（#1335）：每個觀念頁按第一段影片播放，iframe 指向 youtube-nocookie、帶 referrerpolicy，播放器沒有錯誤 153。"""
+    """只在線上版跑（#1335）：每個有影片的觀念頁按第一段影片播放，iframe 指向 youtube-nocookie、帶 referrerpolicy；
+    等播放器載入後隔約 2 秒讀兩次 <video>：都有 <video>、沒有錯誤畫面，第二次在播且時間前進 ≥0.5 秒。讀取例外＝失敗。"""
     ctx, pg, errors = open_page(browser, device)
-    bad = []
-    for cid in pg.evaluate("Object.keys(G5SocBank.CONCEPTS).filter(function(k){return Array.isArray(G5_VIDEOS[k])&&G5_VIDEOS[k].length;})"):
+    bad, ok = [], []
+    cids = pg.evaluate("Object.keys(G5SocBank.CONCEPTS).filter(function(k){return Array.isArray(G5_VIDEOS[k])&&G5_VIDEOS[k].length;})")
+    for cid in cids:
         pg.locator(f'#concepts .ccard[data-cid="{cid}"]').click(); pg.wait_for_selector("#main .remedy")
         b = pg.locator("#main .vids button[data-play]").first
         b.click()
         fr = pg.locator("#main .vids iframe").first
         src, rp = fr.get_attribute("src"), fr.get_attribute("referrerpolicy")
         pg.wait_for_timeout(5000)
-        try:
-            body = pg.frame_locator("#main .vids iframe").first.locator("body").inner_text(timeout=10000)
-        except Exception as e:
-            body = f"<讀不到：{e}>"
-        if "youtube-nocookie.com/embed/" not in (src or "") or rp != "strict-origin-when-cross-origin" or "153" in body or "無法播放" in body:
-            bad.append((cid, src, body[:80]))
+        seen = []
+
+        def read():
+            s = pg.frame_locator("#main .vids iframe").first.locator("body").evaluate(PLAYER_STATE_JS, timeout=10000)
+            seen.append({k: s.get(k) for k in ("t", "paused")} if isinstance(s, dict) else s)
+            return s
+        why = player_problem(src, rp, read, lambda: pg.wait_for_timeout(PLAY_GAP_MS))
+        if why:
+            bad.append((cid, why))
+        else:
+            ok.append((cid, seen))
         pg.locator("#cBack").click(); pg.wait_for_selector("#concepts .ccard")
-    check(f"{label} 有影片的觀念都能嵌入播放（無錯誤 153）", not bad, bad)
+    print("  影片兩次讀到的狀態（觀念：[第一次, 第二次]）：" + json.dumps(ok, ensure_ascii=False))
+    check(f"{label} {len(cids)} 個有影片的觀念都真的在播（隔 {PLAY_GAP_MS / 1000:g} 秒讀兩次：有 <video>、無錯誤畫面、第二次沒暫停、時間前進 ≥{PLAY_MIN_ADVANCE} 秒）", cids and not bad, bad or "沒有任何觀念")
+    ctx.close()
+
+
+def flow_lab_save_fail(browser, label, device=None):
+    """Codex 審 ddd5a2e7：「一句一句看懂」按「下一句」時存檔失敗也照樣前進（check(shown);shown++），
+    恢復後 tasksDone 缺號、完成鈕停用、又沒有待重試的操作，這一輪做不完。
+    重現：按「下一句」前讓 localStorage.setItem 拋錯、按兩次，再恢復，繼續按到底。
+    應該：失敗時留在原句（沒有多出新句、出現「再存一次」），恢復後每一句都記到、完成鈕可按。"""
+    ctx, pg, errors = open_page(browser, device)
+    pg.locator("#goAll").click(); pg.wait_for_selector("#main .q")
+    answer(pg, False)
+    pg.locator('#errq button[data-k="concept"]').click(); pg.wait_for_selector("#remedy")
+    pg.locator("#toLab").click(); pg.wait_for_selector("#labPredict button[data-g]")
+    pg.locator("#labPredict button[data-g]").first.click()
+    pg.wait_for_selector("#mNext")
+    n_lines = pg.evaluate("document.querySelectorAll('#labTask .ck').length")
+    pg.evaluate("""() => { window.__realSet = Storage.prototype.setItem;
+      Storage.prototype.setItem = function () { throw new DOMException('QuotaExceededError', 'QuotaExceededError'); }; }""")
+    for _ in range(2):
+        pg.locator("#mNext").click()
+    shown_while_failing = pg.locator("#mSteps li").count()
+    retry_shown = pg.locator("#retrySave").count() == 1
+    pg.evaluate("() => { Storage.prototype.setItem = window.__realSet; }")
+    n = 0
+    while pg.locator("#mNext").is_visible() and n < 20:
+        pg.locator("#mNext").click(); n += 1
+    run = pg.evaluate("""() => { const s = JSON.parse(localStorage.getItem('g5soc.v1') || 'null'); if (!s) return null;
+      const ids = Object.keys(s.labRuns || {}); const r = s.labRuns[ids[ids.length - 1]]; return r ? {tasksDone: r.tasksDone, tasks: r.tasks} : null; }""")
+    done = sorted((run or {}).get("tasksDone") or [])
+    check(f"{label} 一句一句看懂：存檔失敗時留在原句（沒有前進）並出現「再存一次」", shown_while_failing == 0 and retry_shown, {"失敗時顯示幾句": shown_while_failing, "再存一次": retry_shown})
+    check(f"{label} 一句一句看懂：恢復後每一句都記到（tasksDone 不缺號）、完成鈕可按", run and done == list(range(run["tasks"])) and run["tasks"] == n_lines and pg.locator("#labDone").is_enabled(),
+          {"run": run, "畫面句數": n_lines, "完成鈕": pg.locator("#labDone").is_enabled()})
+    check(f"{label} 一句一句看懂存檔失敗流程沒有 JS 錯誤", not errors, errors)
     ctx.close()
 
 
@@ -155,9 +301,11 @@ def flow_review(browser):
 
 def main():
     with sync_playwright() as p:
+        selftest_player()
         cr = p.chromium.launch()
         if BASE.startswith("https:"):
             flow_video_live(cr, "線上Chromium")
+        flow_lab_save_fail(cr, "桌機", {"viewport": {"width": 1280, "height": 900}})
         flow_main(cr, "桌機", {"viewport": {"width": 1280, "height": 900}})
         flow_main(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True, "device_scale_factor": 2})
         flow_concepts(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True})
