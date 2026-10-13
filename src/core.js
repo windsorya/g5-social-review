@@ -582,9 +582,22 @@
     // 不一樣＝存檔換代了：回 STATE_CHANGED、鎖定本頁失效；這次不跑 reducer、不寫入、不補寫待存操作，也不換掉記憶體快照
     // （舊畫面、閉包、按鈕還在讀它；換成空白會拋 TypeError）。上一版「換成磁碟版／空白再套用舊操作」會讓舊 runId、舊回合、
     // 待存操作失去前提還繼續跑（Codex 設計 20261013 根因），所以改成整頁重載，畫面狀態一起丟掉重來。
-    var lastRaw = null, HOLD = LS_KEY + ".noMigrate", NOTICE = LS_KEY + ".reloaded";
+    var lastRaw = null, HOLD = LS_KEY + ".noMigrate", NOTICE = LS_KEY + ".reloaded", MIG = LS_KEY + ".fromV1";
+    // MIG：這個瀏覽器曾經把舊版 v1 搬進新版（永久標記，在本機存檔）。之後新版被刪掉（別處、同步、手動）也不再搬一次——
+    // 不靠重載前那一刻寫得進分頁暫存或本機存檔（Codex 審 1dc3ded：兩種都寫不進時照樣重載，舊紀錄復活）。
+    // 搬移時一定寫得進（剛剛才寫進新版存檔）；標記寫不進就撤回這次搬移，下次開頁再搬。
     function sGet(k) { try { return session ? session.getItem(k) : null; } catch (e) { return null; } }
     function sSet(k, v) { try { if (session) { if (v === null) session.removeItem(k); else session.setItem(k, v); } } catch (e) { /* 分頁暫存不能用就算了 */ } }
+    // 「失效重載後不搬舊版」的標記：先記在分頁暫存；分頁暫存不能用或寫不進去（讀回不是 "1"），改記在本機存檔的另一個 key，
+    // 不然重載後看不到標記，舊版會被搬回來（Codex 審 812ca9b／c10c0f9 T06：sessionStorage 為 null 或寫入額度滿時舊紀錄復活）
+    function migDone() { try { return storage.getItem(MIG) === "1"; } catch (e) { return false; } }
+    function markMig() { try { storage.setItem(MIG, "1"); return storage.getItem(MIG) === "1"; } catch (e) { return false; } }
+    function holdOn() { if (sGet(HOLD) === "1") return true; try { return storage.getItem(HOLD) === "1"; } catch (e) { return false; } }
+    function holdSet() {
+      sSet(HOLD, "1"); if (sGet(HOLD) === "1") return true;
+      try { storage.setItem(HOLD, "1"); return storage.getItem(HOLD) === "1"; } catch (e) { return false; }
+    }
+    function holdClear() { sSet(HOLD, null); try { if (storage.getItem(HOLD) !== null) storage.removeItem(HOLD); } catch (e) { /* 下次存檔成功再清 */ } }
     function write(next) {
       if (st.stale) return "stale";
       var errs = checkState(next, bank);
@@ -593,7 +606,7 @@
       var txt = JSON.stringify(next);
       try { storage.setItem(LS_KEY, txt); } catch (e) { return "failed"; }
       lastRaw = txt;
-      if (st.migrateHeld) { st.migrateHeld = false; sSet(HOLD, null); }   // 新存檔成功了，之後不必再擋舊版搬移
+      if (st.migrateHeld) { st.migrateHeld = false; holdClear(); }   // 新存檔成功了，之後不必再擋舊版搬移
       return "ok";
     }
     // "ok"＝磁碟跟上次一樣；"fail"＝讀不到（不寫、待存留著重試，不當成空白）；"changed"＝被別處改了（本頁失效）
@@ -610,20 +623,28 @@
     function load() {
       var raw = null, old = null;
       st.reloadNotice = sGet(NOTICE) === "1"; if (st.reloadNotice) sSet(NOTICE, null);
-      st.migrateHeld = sGet(HOLD) === "1";
+      st.migrateHeld = holdOn();
       try { raw = storage.getItem(LS_KEY); } catch (e) { st.loadError = "READ"; st.saveStatus = "blocked"; return st; }
       lastRaw = raw;   // 壞掉的存檔也記原文：沒再變就不算外部變更（不會重載循環）
       if (raw !== null) {
         var r = decode(raw, bank);
-        if (r.accepted) { st.state = r.state; } else { st.loadError = r.error; st.saveStatus = "blocked"; }
+        if (r.accepted) {
+          st.state = r.state;
+          // 這個標記上線前就搬過的瀏覽器：新版與舊版都在、還沒有標記，就補記（之後新版被刪也不搬）
+          try { if (!migDone() && storage.getItem(LS_V1) !== null) markMig(); } catch (e) { /* 下次開頁再補 */ }
+        } else { st.loadError = r.error; st.saveStatus = "blocked"; }
         return st;
       }
-      if (st.migrateHeld) return st;   // 失效重載：新版被刪了也不自動搬舊版回來（舊版原文不動，等新存檔成功才解除）
+      if (st.migrateHeld || migDone()) return st;   // 失效重載：新版被刪了也不自動搬舊版回來（舊版原文不動，等新存檔成功才解除）
       try { old = storage.getItem(LS_V1); } catch (e) { st.loadError = "READ"; st.saveStatus = "blocked"; return st; }
       if (old !== null) {
         var why = v1Problem(old), m = why ? null : migrateV1(old, clock(), bank);
         if (!m) { st.loadError = "MIGRATE"; st.migrateReason = why || "BAD_V1"; st.saveStatus = "blocked"; return st; }
         var w = write(m);   // 寫入成功才公布；寫不進去就封鎖，下次開啟再搬（v1 原文始終不動）
+        if (w === "ok" && !markMig()) {   // 標記寫不進：撤回這次搬移（不留下沒有標記的新版），下次開頁再搬
+          try { storage.removeItem(LS_KEY); lastRaw = null; } catch (e) { /* 撤不回：新版留著，下次開頁補記標記 */ }
+          w = "failed";
+        }
         if (w === "ok") { st.state = m; st.migrated = true; st.saveStatus = "ok"; }
         else { st.loadError = "MIGRATE"; st.migrateReason = "WRITE"; st.saveStatus = "blocked"; }
       }
@@ -686,7 +707,8 @@
     function invalidate() { st.stale = true; return changed(); }   // 同步程式已經換掉存檔（onReplaced）：不必比對，直接失效
     function watches(key) { return key === null || key === LS_KEY; }   // clear() 的事件 key 是 null；別站 key、probe 都不理
     // 孩子按「載入最新紀錄」或自動重載前：明確取消舊的待存操作；在這個分頁記下「重載後提示、新版不存在時不搬舊版」
-    function prepareReload() { st.pendingAction = null; sSet(HOLD, "1"); sSet(NOTICE, "1"); }
+    // 回傳 true＝「不搬舊版」標記確實記住了（分頁暫存或本機存檔其一讀得回來）
+    function prepareReload() { st.pendingAction = null; var held = holdSet(); sSet(NOTICE, "1"); return held; }
     function accepted(id) { return st.state.ops.indexOf(id) >= 0; }   // 畫面只在「這個操作 ID 真的寫進去了」才公布結果
     function discardBroken() {   // 家長明確按「清除並重新開始」：一樣先驗證、寫入成功才公布；v1 原文不動
       if (st.loadError !== "SCHEMA" && st.loadError !== "MIGRATE") return false;
@@ -695,7 +717,7 @@
       if (checkState(b0, bank).length) return false;
       try { storage.setItem(LS_KEY, JSON.stringify(b0)); lastRaw = JSON.stringify(b0); } catch (e) { st.saveStatus = "failed"; return false; }
       st.loadError = null; st.migrateReason = null; st.state = b0; st.saveStatus = "ok"; st.pendingAction = null;
-      if (st.migrateHeld) { st.migrateHeld = false; sSet(HOLD, null); }
+      if (st.migrateHeld) { st.migrateHeld = false; holdClear(); }
       return true;
     }
     return { get: function () { return st; }, load: load, dispatch: dispatch, retry: retry, accepted: accepted, discardBroken: discardBroken,

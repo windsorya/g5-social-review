@@ -37,6 +37,8 @@ INIT = """(() => { const S = Storage.prototype, set = S.setItem, get = S.getItem
     }
     return set.call(this, k, v); };
   S.getItem = function (k) { if (window.__failGet && this === window.localStorage) throw new DOMException('SecurityError', 'SecurityError'); return get.call(this, k); };
+  const ss = S.setItem; S.setItem = function (k, v) { if (window.__failSession && this === window.sessionStorage) throw new DOMException('QuotaExceededError', 'QuotaExceededError'); return ss.call(this, k, v); };
+  const raf = window.requestAnimationFrame; window.__raf = 0; window.requestAnimationFrame = function (f) { window.__raf++; return raf.call(window, f); };
 })();"""
 
 SNAP = """(sel) => { const K = G5Core.LS_KEY, o = document.querySelector('#outdated');
@@ -827,6 +829,119 @@ def m_last_resume(browser, label, dev):
         ctx.close()
 
 
+# ---------------------------------------------------------------- 第 2 輪（Codex 審 812ca9b／04f1e26／889660d／c10c0f9）
+def t06b(browser, label, dev):
+    """分頁暫存寫不進去：失效重載後仍不搬回 v1（標記改記在本機存檔）。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        v1 = '{"v":1,"cards":{}}'
+        B.ev("(v) => { localStorage.clear(); sessionStorage.clear(); localStorage.setItem(G5Core.LS_V1, v); }", v1)
+        B.p.reload(); B.ready()
+        pre = B.raw() is not None
+        B.ev("() => { window.__failSession = true; }")
+        b0 = B.navs
+        B.ev("() => localStorage.removeItem(G5Core.LS_KEY)")
+        B.ev("() => document.dispatchEvent(new Event('visibilitychange'))")
+        reloaded = B.wait_reload(b0)
+        check(f"{label} T06b 前提：第一次開頁把舊版搬進來", pre, "沒搬")
+        check(f"{label} T06b 分頁暫存寫不進去、失效重載後仍不搬回舊版、不寫存檔", reloaded and B.raw() is None and B.ev("window.__w") == 0 and not B.errors,
+              {"重載": reloaded, "raw": B.raw(), "w": B.ev("window.__w"), "errors": B.errors})
+    finally:
+        ctx.close()
+
+
+def t06c(browser, label, dev):
+    """重載前分頁暫存與本機存檔都寫不進、重載後恢復：靠搬移時記的永久標記，仍不搬回 v1（Codex 審 1dc3ded）。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        v1 = '{"v":1,"cards":{}}'
+        B.ev("(v) => { localStorage.clear(); sessionStorage.clear(); localStorage.setItem(G5Core.LS_V1, v); }", v1)
+        B.p.reload(); B.ready()
+        pre = B.raw() is not None and B.ev("localStorage.getItem(G5Core.LS_KEY + '.fromV1')") == "1"
+        B.ev("() => { window.__failSession = true; window.__failSet = true; }")
+        b0 = B.navs
+        B.ev("() => localStorage.removeItem(G5Core.LS_KEY)")
+        B.ev("() => document.dispatchEvent(new Event('visibilitychange'))")
+        reloaded = B.wait_reload(b0)
+        check(f"{label} T06c 前提：第一次開頁把舊版搬進來、記了永久標記", pre, "沒搬或沒標記")
+        check(f"{label} T06c 兩種儲存在重載前都寫不進、重載後恢復：仍不搬回舊版、不寫存檔", reloaded and B.raw() is None and B.ev("window.__w") == 0 and not B.errors,
+              {"重載": reloaded, "raw": B.raw(), "w": B.ev("window.__w"), "errors": B.errors})
+    finally:
+        ctx.close()
+
+
+def t08b(browser, label, dev):
+    """已補存的那一步（設定操作順便補存、句數還沒前進），同頁刪檔後按「下一句／下一步」：不得前進。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        if not open_lab(B) or not B.has("#mNext"):
+            print(f"SKIP {label} T08b 本站沒有逐句解說（#mNext）")
+            return
+        predict(B)
+        B.ev("() => { window.__failSet = true; }")
+        B.p.locator("#mNext").click()
+        B.ev("() => { window.__failSet = false; }")
+        B.ev("() => { const s = document.querySelector('#snd'); s.value = s.value === 'off' ? '0' : 'off'; s.dispatchEvent(new Event('change')); }")
+        run = B.ev(LAST_RUN)
+        pre = run and run["tasksDone"] == [0] and B.p.locator("#mSteps li").count() == 0
+        B.ev("() => localStorage.removeItem(G5Core.LS_KEY)")
+        b0 = B.navs
+        snap = B.ev(SYNC_CLICK, "#mNext")
+        reloaded = B.wait_reload(b0)
+        check(f"{label} T08b 前提：設定操作補存了第一步、畫面句數仍是 0", pre, {"run": run})
+        check(f"{label} T08b 已補存的一步、同頁刪檔後按下一句：不前進、進入恢復流程、不寫入",
+              snap.get("li") == 0 and overlay_ok(snap, False) and snap.get("dw") == 0 and reloaded and B.raw() is None and not B.errors,
+              {"snap": snap, "重載": reloaded, "errors": B.errors})
+    finally:
+        ctx.close()
+
+
+def t15_anim(browser, label, dev):
+    """自然站溶解實驗：待存的一步遇到同頁刪檔，失效後動畫不再被同一個按鈕重新啟動。"""
+    ctx = new_ctx(browser, dev)
+    try:
+        B = Tab(ctx)
+        # 溶解實驗在第三單元（預設關閉）：先在設定裡打開第三單元，再從觀念卡逐一找；沒有這個實驗的站略過
+        B.ev("() => { const u = document.querySelector('#u3'); if (u && !u.checked) { u.checked = true; u.dispatchEvent(new Event('change')); } }")
+        found = False
+        n = B.p.locator("#concepts .ccard:not(.off)").count()
+        for i in range(n):
+            B.p.locator("#concepts .ccard:not(.off)").nth(i).click()
+            if B.has("#cLab"):
+                B.p.locator("#cLab").click()
+                B.p.wait_for_selector("#labPredict button[data-g]")
+                if B.has("#dsSalt"):
+                    found = True
+                    break
+                for sel in ("#labHome", "#labSkip"):
+                    if B.has(sel):
+                        B.p.locator(sel).click()
+                        break
+            B.p.wait_for_selector("#concepts .ccard")
+        if not found:
+            print(f"SKIP {label} T15 動畫：本站沒有溶解實驗")
+            return
+        predict(B)
+        for _ in range(5):
+            B.p.locator("#dsSalt").click()
+        B.ev("() => { window.__failSet = true; }")
+        B.p.locator("#dsSalt").click()          # 第 6 匙溶不下：任務寫入失敗＝待存
+        B.ev("() => { window.__failSet = false; }")
+        B.ev("() => localStorage.removeItem(G5Core.LS_KEY)")
+        B.p.locator("#dsSalt").click()          # 再加一匙：偵測失效
+        B.p.wait_for_timeout(100)
+        r0 = B.ev("window.__raf")
+        B.p.wait_for_timeout(600)
+        r1 = B.ev("window.__raf")
+        ov = B.ev("document.querySelectorAll('#outdated').length")
+        check(f"{label} T15 失效後動畫停住、不被同一個按鈕重新啟動", ov == 1 and r1 == r0 and not B.errors, {"遮罩": ov, "raf": [r0, r1], "errors": B.errors})
+    finally:
+        ctx.close()
+
+
 FLOWS = [
     ("T01", t01, ()), ("T02", t02, ()), ("T03", t03, ()), ("T04", t04, ()),
     ("T05", t05, ("removeItem",)), ("T05", t05, ("clear",)), ("T06", t06, ()),
@@ -838,6 +953,7 @@ FLOWS = [
     ("T12", t12, ("dispatch",)), ("T12", t12, ("tick",)), ("T13", t13, ()),
     ("T14", t14_broken, ()), ("T14", t14_read, ()), ("T15", t15_pending, ()), ("T15", t15_burst, ()),
     ("M", m_save_fail, ()), ("M", m_retry_resume, ()), ("M", m_last_resume, ()),
+    ("T06", t06b, ()), ("T06", t06c, ()), ("T08", t08b, ()), ("T15", t15_anim, ()),
 ]
 
 

@@ -804,11 +804,12 @@ test("R4 D4-c session.answered／wrong 裡的消失卡要剔掉（殺突變 N4�
   assert.equal(v.completed, false);
 });
 
-test("R5/R8 合法 v1 照常搬（D2-d）：只寫一次、migrateReason=null", () => {
+test("R5/R8 合法 v1 照常搬（D2-d）：新版只寫一次＋「已從舊版搬過」永久標記一次（Codex 審 1dc3ded）、migrateReason=null", () => {
   const b = bank(["s1"]);
   const v1 = '{"v":1,"cards":{"s1":{"seen":8,"due":"2026-10-25"}}}';
   const mem = memStorage({ "g5soc.none": v1 }); const st = mkStore(mem, b, { t: NOON(D) });
-  assert.deepEqual([st.get().loadError, st.get().migrateReason, mem.writes()], [null, null, 1]);
+  assert.deepEqual([st.get().loadError, st.get().migrateReason, mem.writes()], [null, null, 2]);
+  assert.equal(mem.raw[C.LS_KEY + ".fromV1"], "1", "沒記永久標記");
   assert.deepEqual(st.get().state.cards.s1, { seen: 8, goodDays: [], blockedDay: null, due: "2026-10-21", needsRecheck: true });
   assert.equal(mem.raw["g5soc.none"], v1);
 });

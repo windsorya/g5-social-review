@@ -824,7 +824,8 @@ function check(i){
   var rr=run();
   if(!rr||rr.phase==="predict") return false;
   // Codex 審 e195ef98：這一句是之前補存進去的（visibilitychange／再存一次），也要重繪任務與完成鈕，不然完成鈕一直停用
-  if(rr.tasksDone.indexOf(i)>=0){drawTasks();drawNav();if(rr.tasksDone.length>=rr.tasks)drawPredict();return true;}
+  // 已存過也要先確認存檔沒被別處改掉（Codex 審 04f1e26／889660d／c10c0f9 T08：補存後同頁刪檔，這條捷徑不經 act() 就前進）
+  if(rr.tasksDone.indexOf(i)>=0){if(store.check().error==="STATE_CHANGED"){outdated();return false;}drawTasks();drawNav();if(rr.tasksDone.length>=rr.tasks)drawPredict();return true;}
   var r=act({type:"labTask",runId:lab.runId,task:i});
   if(r.ok){drawTasks();drawNav();if(run().tasksDone.length>=run().tasks)drawPredict();}
   return !!(r.ok||r.dup);
