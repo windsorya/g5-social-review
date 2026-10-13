@@ -293,12 +293,16 @@ var seq = 0;
 function newId(p){seq++;return (p||"a")+Date.now().toString(36)+seq.toString(36)+Math.floor(Math.random()*1e6).toString(36);}
 function S(){return store.get().state;}
 function V(){return store.view();}
-function act(a){if(a.type!=="tick"&&!a.id)a.id=newId();var r=store.dispatch(a);if(r.error==="STATE_CHANGED"){outdated();return r;}if(r.ok&&a.type!=="tick")reloadNote=false;banners();return r;}
+function act(a){if(a.type!=="tick"&&!a.id)a.id=newId();var r=store.dispatch(a);if(r.error==="STATE_CHANGED"){outdated();return r;}if(r.ok&&a.type!=="tick")reloadNote=false;if(r.ok)readNote=false;banners();return r;}
 
 /* ---------- 存檔在別處被改掉（設計 20261013 方案 A）：整頁失效，重載後用最新的紀錄 ---------- */
 // 另一個分頁、另一台裝置（同步）或清除紀錄改了存檔：這頁的畫面、實驗、待存答案都失去前提，不再寫入。
 // 沒有待存的一步就直接重載；有待存的一步就停下來說清楚「這一步需要重做」，按「載入最新紀錄」才重載。每頁只排一次重載。
 var reloadNote=store.get().reloadNotice, outdatedOn=false, reloading=false;
+// 設計 task-mv6srlue-pujdyl S3：讀不到存檔（READ）＝不能確認有沒有被別處改——畫面停在原處、不前進、不重載，只提示再試一次
+var readNote=false;
+function readFail(){readNote=true;banners();}
+function readOk(){if(readNote){readNote=false;banners();}}
 function outdated(){
   if(outdatedOn) return; outdatedOn=true;
   stopAnim();
@@ -354,6 +358,7 @@ function header(){
 function banners(){
   var st=store.get(), h="";
   if(reloadNote) h+='<div class="banner info" id="reloadNote"><strong>紀錄已更新，請從這裡繼續</strong></div>';
+  if(readNote) h+='<div class="banner" id="readNote" role="status"><strong>暫時讀不到紀錄，請再試一次</strong><span class="small">剛剛那一步先停在這裡，沒有存、也沒有往下走。</span></div>';
   if(st.loadError==="SCHEMA") h+='<div class="banner"><strong>存檔讀不出來（可能被改壞了）</strong><span class="small">為了不蓋掉原本的紀錄，現在不會存任何作答。請爸媽到「設定與題庫」決定要不要清除重來。</span></div>';
   // R5/R8（4agent）：只有真的寫不進去（WRITE）才提儲存空間；格式讀不懂就直接指向「設定與題庫」的略過按鈕
   else if(st.loadError==="MIGRATE"&&st.migrateReason==="WRITE") h+='<div class="banner"><strong>舊版的作答紀錄搬不過來</strong><span class="small">可能是這台裝置的儲存空間不夠。舊紀錄還在、沒有被刪；清出一些空間後重新整理頁面，就會再搬一次。這段時間不會存作答。</span></div>';
@@ -617,7 +622,7 @@ function submit(c,ok,m,selfGraded){
 }
 // 兩個「再存一次」（上方提示列、題目下方）走同一條路：存成功才公布回饋
 function retrySave(){
-  var rr=store.retry(); if(rr.error==="STATE_CHANGED"){outdated();return;} banners();
+  var rr=store.retry(); if(rr.error==="STATE_CHANGED"){outdated();return;} if(rr.error==="READ"){readFail();return;} banners();
   var f=$("#saveFail");
   if(f&&pending){ if(store.accepted(pending.a.id)){f.remove();feedback(pending,(rr&&rr.info)||{});} return; }
   if(rr.ok){ if(!labRefresh()) route(); }
@@ -626,6 +631,8 @@ function retrySave(){
 // 回傳 true＝已在原畫面重繪；false＝不在學習畫面（或這一輪不在紀錄裡），交給 route()
 function labRefresh(){
   if(screen!=="lab"||!lab||!run()) return false;
+  // 設計 S3：用記憶體裡的進度重畫之前先查存檔；被別處改了就失效，讀不到就停在原處（回 true：已處理，不交給 route()）
+  var ck=store.check(); if(ck.error==="STATE_CHANGED"){outdated();return true;} if(ck.ok!==true){readFail();return true;} readOk();
   if(lab.sync) lab.sync();
   drawPredict(); drawTasks(); drawNav();
   return true;
@@ -825,7 +832,8 @@ function check(i){
   if(!rr||rr.phase==="predict") return false;
   // Codex 審 e195ef98：這一句是之前補存進去的（visibilitychange／再存一次），也要重繪任務與完成鈕，不然完成鈕一直停用
   // 已存過也要先確認存檔沒被別處改掉（Codex 審 04f1e26／889660d／c10c0f9 T08：補存後同頁刪檔，這條捷徑不經 act() 就前進）
-  if(rr.tasksDone.indexOf(i)>=0){if(store.check().error==="STATE_CHANGED"){outdated();return false;}drawTasks();drawNav();if(rr.tasksDone.length>=rr.tasks)drawPredict();return true;}
+  // 設計 task-mv6srlue-pujdyl S3：只有 check().ok===true 才前進；讀不到（READ）也不前進（Codex 審 058240f／8959313／a088333：只攔 STATE_CHANGED、READ 照樣前進）
+  if(rr.tasksDone.indexOf(i)>=0){var ck=store.check();if(ck.error==="STATE_CHANGED"){outdated();return false;}if(ck.ok!==true){readFail();return false;}readOk();drawTasks();drawNav();if(rr.tasksDone.length>=rr.tasks)drawPredict();return true;}
   var r=act({type:"labTask",runId:lab.runId,task:i});
   if(r.ok){drawTasks();drawNav();if(run().tasksDone.length>=run().tasks)drawPredict();}
   return !!(r.ok||r.dup);
@@ -932,6 +940,7 @@ on("#importBtn",function(){
 /* ---------- 啟動與跨午夜 ---------- */
 document.addEventListener("visibilitychange",function(){
   if(document.visibilityState!=="visible") return;
+  var ck=store.check(); if(ck.error==="STATE_CHANGED"){outdated();return;} if(ck.ok!==true){readFail();return;} readOk();   // 設計 S3：只有確認沒變才重畫
   var changed=V().today!==shownDay; if(act({type:"tick"}).error==="STATE_CHANGED") return;   // 失效了：不再重畫舊畫面
   if(changed){ if(screen==="practice") route(); else renderHome(); renderSide(); }
   else if(screen==="home") renderHome();
