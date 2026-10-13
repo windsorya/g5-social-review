@@ -591,7 +591,9 @@
       var raw;
       try { raw = storage.getItem(LS_KEY); } catch (e) { return false; }   // 讀不到就不寫，免得蓋掉看不到的資料
       if (raw === lastRaw) return true;
-      if (raw === null) return false;   // 原本有存檔、現在被別處整個刪掉：不把記憶體裡的舊紀錄寫回去（Codex 審 2e70601）
+      // 原本有存檔、現在被別處整個刪掉：磁碟是唯一真相，沒有存檔＝空白紀錄。換成空白再套用這次操作——
+      // 舊紀錄不會被寫回去，清除與重試也照常成功（Codex 審自然 8362c82／數學 fd585e3：一律拒寫會讓頁面卡死）。
+      if (raw === null) { st.state = blankState(); lastRaw = null; return true; }
       var r = decode(raw, bank);
       if (!r.accepted) return false;
       st.state = r.state; lastRaw = raw;

@@ -882,6 +882,20 @@ test("M5 別處把存檔整個刪掉後，這個分頁不得把舊紀錄寫回�
   const S = C.createStore({ storage: mem, bank: b, clock: () => NOON(D) }); S.load();
   assert.ok(S.dispatch(op("answer", { cardId: "s1", ok: true })).ok);
   mem.removeItem(C.LS_KEY);
-  assert.equal(S.dispatch({ type: "tick" }).ok, false);
-  assert.equal(mem.raw[C.LS_KEY], undefined, "舊紀錄復活了");
+  // 磁碟上沒有存檔＝空白紀錄（Codex 審 8362c82／fd585e3：上一版改成一律拒寫，連「清除」與「再存一次」都卡死）
+  assert.ok(S.dispatch({ type: "tick" }).ok);
+  assert.deepEqual(Object.keys(JSON.parse(mem.raw[C.LS_KEY]).cards), [], "舊紀錄復活了");
+});
+
+test("M6 存檔被刪掉後：再作答只存新的、清除全部紀錄可以成功、待存操作可以重試成功", () => {
+  const b = bank(["s1", "s2"]); const mem = flakyStorage();
+  const S = C.createStore({ storage: mem, bank: b, clock: () => NOON(D) }); S.load();
+  assert.ok(S.dispatch(op("answer", { cardId: "s1", ok: true })).ok);
+  mem.removeItem(C.LS_KEY);
+  mem.setWrite(true); const A = op("answer", { cardId: "s2", ok: true });
+  assert.equal(S.dispatch(A).ok, false); mem.setWrite(false);
+  assert.ok(S.retry().ok, "恢復後重試要成功");
+  assert.deepEqual(Object.keys(JSON.parse(mem.raw[C.LS_KEY]).cards), ["s2"], "只留新的作答");
+  assert.ok(S.dispatch(op("reset")).ok, "清除全部作答紀錄要成功");
+  assert.deepEqual(Object.keys(JSON.parse(mem.raw[C.LS_KEY]).cards), []);
 });
