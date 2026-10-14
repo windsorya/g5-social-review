@@ -5,7 +5,8 @@
   ② 第一站標放好了（國語「放了一本書」；寬版靠打勾），第二站標「做過 2／N 題」（N＝第二站題數）
   ③ 地圖上有放書規則的說明
   ④ 頁面沒有 JS 錯誤
-數學、國語、社會三站同一支（題庫檔自動找 src/*bank.js；放書說明讀頁面上的 G5Map.RULE／DONE）。
+自然、數學、國語、社會四站同一支：題庫檔自動找 src/*bank.js；自然站題庫寫在 app.html 裡，改從 app.html＋bank_extra.js＋merge.js 組出來
+（第三單元開關打開，其他三站不受影響）；放書（長大）說明讀頁面上的 G5Map.RULE／DONE。
 執行：python3.12 tests/e2e_map_rule.py（Chromium 桌機、WebKit iPad、Chromium 手機三種尺寸）
 """
 import json
@@ -16,17 +17,27 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parent.parent
+URL = (ROOT / "index.html").as_uri()
+# 造存檔：第一站的卡片全部做過一次、第二站做過 2 張；不碰出口題。node 與瀏覽器共用同一段（ES5，兩邊都能跑）
+SEED_JS = ("(function(C,cards,ids){var s=C.blankState();s.settings.unit3=true;"
+           "var card=function(){return {seen:1,goodDays:['2026-10-14'],blockedDay:null,due:'2026-10-15'};};"
+           "var c1=cards.filter(function(c){return c.concept===ids[0];}),c2=cards.filter(function(c){return c.concept===ids[1];});"
+           "c1.forEach(function(c){s.cards[c.id]=card();});c2.slice(0,2).forEach(function(c){s.cards[c.id]=card();});"
+           "return {key:C.LS_KEY,s:s,ids:ids,n2:c2.length};})")
 
 
 def seed_state():
-    bank = next(f.name for f in (ROOT / "src").glob("*bank.js"))
-    js = ("const C=require('./src/core.js'),B=require('./src/" + bank + "');const s=C.blankState();"
-          "const ids=Object.keys(B.CONCEPTS);"
-          "const card=()=>({seen:1,goodDays:['2026-10-14'],blockedDay:null,due:'2026-10-15'});"
-          "const c1=B.CARDS.filter(c=>c.concept===ids[0]),c2=B.CARDS.filter(c=>c.concept===ids[1]);"
-          "c1.forEach(c=>{s.cards[c.id]=card();});c2.slice(0,2).forEach(c=>{s.cards[c.id]=card();});"
-          "if(C.checkState&&C.checkState(s,{cards:B.CARDS,concepts:Object.fromEntries(ids.map(k=>[k,{unit:B.CONCEPTS[k].unit}]))}).length)throw new Error('seed 不合 schema');"
-          "console.log(JSON.stringify({key:C.LS_KEY,s,ids,n2:c2.length,short:[B.CONCEPTS[ids[0]].short,B.CONCEPTS[ids[1]].short]}));")
+    banks = sorted((ROOT / "src").glob("*bank.js"))
+    if banks:
+        js = ("const C=require('./src/core.js'),B=require('./src/" + banks[0].name + "');"
+              "console.log(JSON.stringify(" + SEED_JS + "(C,B.CARDS,Object.keys(B.CONCEPTS))));")
+    else:   # 自然站：題庫＝app.html 的 BASE_CARDS＋src/bank_extra.js，扣掉 src/merge.js 合併掉的（同 app.html 的 BANK；抽法同 tests/bank.test.js）
+        js = ("const fs=require('fs'),vm=require('vm'),C=require('./src/core.js');const h=fs.readFileSync('src/app.html','utf8');"
+              "const grab=(a,b)=>{const i=h.indexOf(a),j=h.indexOf(b,i);if(i<0||j<i)throw new Error('找不到 '+a);return h.slice(i+a.length,j);};"
+              "const base=Array.from(vm.runInNewContext('('+grab('var BASE_CARDS = ',';\\nvar ALL_CARDS')+')'));"
+              "const M=require('./src/merge.js');const cards=base.concat(require('./src/bank_extra.js')).filter(c=>!M[c.id]);"
+              "const ids=Object.keys(vm.runInNewContext('('+grab('var CONCEPTS = ',';\\nvar CIDS')+')'));"
+              "console.log(JSON.stringify(" + SEED_JS + "(C,cards,ids)));")
     return json.loads(subprocess.check_output(["node", "-e", js], cwd=ROOT))
 
 
@@ -40,12 +51,12 @@ def check(name, ok, detail=""):
 
 
 def main():
-    d = seed_state()
-    init = ("if(!sessionStorage.getItem('s')){sessionStorage.setItem('s','1');localStorage.setItem(%s,%s);}"
-            % (json.dumps(d["key"]), json.dumps(json.dumps(d["s"]))))
-    url = (ROOT / "index.html").as_uri()
+    url = URL
     total = 0
+    d = seed_state()
     with sync_playwright() as p:
+        init = ("if(!sessionStorage.getItem('s')){sessionStorage.setItem('s','1');localStorage.setItem(%s,%s);}"
+                % (json.dumps(d["key"]), json.dumps(json.dumps(d["s"]))))
         for eng, vp in ((p.chromium, {"width": 1280, "height": 900}), (p.webkit, {"width": 820, "height": 1180}), (p.chromium, {"width": 390, "height": 844})):
             b = eng.launch()
             pg = b.new_page(viewport=vp)
