@@ -199,8 +199,10 @@
     syncSession(s, bank, today);
     pruneVanished(s, bank, today);
     var wasDone = dayCompleted(day);
-    // 只有計畫先完成，之後實際完成的才算加碼（矩陣 9、10、12）；補做回合裡做的（含補救實驗）不算今天加碼（Codex 審 b482558）
-    function extra() { if (wasDone && !(s.session && s.session.makeup)) day.extraDone = true; }
+    function extra() { if (wasDone) day.extraDone = true; }   // 只有計畫先完成，之後實際完成的才算加碼（矩陣 9、10、12）
+    // 這次操作屬於哪一天的補做：只認畫面出題時帶來的日子（action.makeup），不看共用的 session——
+    // 別的分頁換了回合、或補做早就做完，都不會把作答記錯天、也不會擋掉之後的一般加碼（Codex 審 414134e）。
+    function makeupDayOf(k) { return isDay(k) && k < today && s.days[k] && s.days[k].madeUp ? s.days[k] : null; }
 
     switch (action.type) {
       case "tick": break;
@@ -252,7 +254,7 @@
         var sessKind = s.session && s.session.kinds[card.id];
         var variation = !!action.variation || sessKind === "variation";
         // 補做回合：「這天練過」記在補做那天（target）；間隔複習照今天算
-        var mkd = s.session && s.session.makeup && s.days[s.session.makeup] || null, target = mkd || day;
+        var mkd = makeupDayOf(action.makeup), target = mkd || day;
         var first = day.touched.indexOf(card.id) < 0 && (!mkd || mkd.touched.indexOf(card.id) < 0);
         var shaky = !action.ok || !!action.hint || !!action.unsure;
         cs.seen++;
@@ -364,7 +366,9 @@
         if (r3.tasksDone.length < r3.tasks) return fail(state0, "TASKS_LEFT");
         r3.phase = "complete";
         day.labRuns++;
-        extra();
+        // 補做卡答錯進去的補救實驗是補做的一部分，不算今天加碼；其他實驗照常
+        var mkLab = r3.from === "wrong" && r3.card && Object.keys(s.days).some(function (k) { var dd = s.days[k]; return k < today && dd.madeUp === today && dd.planIds.indexOf(r3.card) >= 0; });
+        if (!mkLab) extra();
         if (r3.from === "wrong" && r3.card && s.session) {
           var orig = cardById(s, bank, r3.card);
           var v = orig ? pickVariation(s, bank, orig, action.variationId) : null;

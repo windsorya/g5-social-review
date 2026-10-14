@@ -918,7 +918,7 @@ test("MK1 今天做完後補做：那天記成練過（新卡 5 張、不重複�
   const plan = s.days[MK].planIds;
   assert.equal(plan.length, 5); assert.ok(plan.every((id) => today.indexOf(id) < 0));
   assert.equal(s.session.makeup, MK); assert.equal(s.session.kind, "plan");
-  plan.forEach((id) => { s = run(s, B12, NOON(D), op("answer", { cardId: id, ok: true })); });
+  plan.forEach((id) => { s = run(s, B12, NOON(D), op("answer", { cardId: id, ok: true, makeup: MK })); });
   assert.deepEqual(s.days[MK].touched.sort(), plan.slice().sort());
   assert.deepEqual(s.days[MK].doneIds.sort(), plan.slice().sort());
   assert.equal(s.days[D].touched.length, 5, "今天的紀錄不動"); assert.equal(s.days[D].extraDone, false);
@@ -936,7 +936,7 @@ test("MK2 線上舊版核心（d7d1d78）讀補做後的存檔：不判壞；在
   const r = OLD.reduce(s, op("answer", { cardId: s.days[MK].planIds[0], ok: true }), { bank: B12, now: NOON(D) });
   assert.ok(!r.error, String(r.error));
   assert.deepEqual(OLD.checkState(r.state, B12), []);
-  s.days[MK].planIds.forEach((id) => { s = run(s, B12, NOON(D), op("answer", { cardId: id, ok: true })); });
+  s.days[MK].planIds.forEach((id) => { s = run(s, B12, NOON(D), op("answer", { cardId: id, ok: true, makeup: MK })); });
   assert.deepEqual(OLD.checkState(s, B12), [], "補做完成後");
 });
 
@@ -946,7 +946,7 @@ test("MK3 不能補的情況：今天還沒做完、那天已練過、今天或�
   s = doneToday(B12);
   [D, "2026-10-21", "10/18", null].forEach((d) => assert.equal(C.reduce(s, op("sessionStart", { kind: "makeup", day: d }), env(B12, NOON(D))).error, "MAKEUP_DAY", String(d)));
   s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));
-  s = run(s, B12, NOON(D), op("answer", { cardId: s.days[MK].planIds[0], ok: true }));
+  s = run(s, B12, NOON(D), op("answer", { cardId: s.days[MK].planIds[0], ok: true, makeup: MK }));
   assert.equal(C.reduce(s, op("sessionStart", { kind: "makeup", day: MK }), env(B12, NOON(D))).error, "MAKEUP_DAY", "練過一張就算練過");
 });
 
@@ -964,7 +964,7 @@ test("MK4 新卡用完改排練過但還沒畢業的卡；全部畢業才說沒�
   assert.deepEqual(s.days["2026-10-22"].planIds, ["a6", "a7", "a8"]);
   s = run(s, b8, NOON("2026-10-22"), op("sessionStart", { kind: "makeup", day: MK }));
   assert.deepEqual(s.days[MK].planIds.slice().sort(), ["a1", "a2", "a3", "a4", "a5"]);
-  s.days[MK].planIds.forEach((id) => { s = run(s, b8, NOON("2026-10-22"), op("answer", { cardId: id, ok: true })); });
+  s.days[MK].planIds.forEach((id) => { s = run(s, b8, NOON("2026-10-22"), op("answer", { cardId: id, ok: true, makeup: MK })); });
   assert.equal(C.reduce(s, op("sessionStart", { kind: "makeup", day: "2026-10-17" }), env(b8, NOON("2026-10-22"))).error, "MAKEUP_EMPTY", "今天別次補做練過的卡不再排");
 });
 
@@ -979,23 +979,25 @@ test("MK6 補做那天原本有實驗、考考爸媽、心情紀錄（沒答卡�
 });
 
 test("MK7 補做回合裡做補救實驗：今天不算加碼（extraDone 照舊 false）", () => {
-  const lab = { lab: "x", day: D, phase: "observe", prediction: null, predictionCorrect: null, answer: 0, tasks: 0, tasksDone: [], from: "menu", card: null };
+  const lab = (from, cardId) => ({ lab: "x", day: D, phase: "observe", prediction: null, predictionCorrect: null, answer: 0, tasks: 0, tasksDone: [], from, card: cardId });
   let s = doneToday(B12);
-  s.labRuns.r1 = Object.assign({}, lab);
   s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));
+  const c0 = s.days[MK].planIds[0];
+  s = run(s, B12, NOON(D), op("answer", { cardId: c0, ok: false, makeup: MK }));
+  s.labRuns.r1 = lab("wrong", c0);
   s = run(s, B12, NOON(D), op("labComplete", { runId: "r1" }));
-  assert.equal(s.labRuns.r1.phase, "complete", "實驗真的完成了（有經過 extra()）");
-  assert.equal(s.days[D].extraDone, false, "補做回合中完成實驗，今天不算加碼");
-  // 對照：不在補做回合時，同樣的實驗會算加碼（證明上面不是空測）
-  let t = doneToday(B12); t.labRuns.r1 = Object.assign({}, lab);
-  t = run(t, B12, NOON(D), op("labComplete", { runId: "r1" }));
-  assert.equal(t.days[D].extraDone, true);
+  assert.equal(s.labRuns.r1.phase, "complete", "實驗真的完成了（有經過 extra() 那一行）");
+  assert.equal(s.days[D].extraDone, false, "補做卡答錯進去的補救實驗，今天不算加碼");
+  // 對照：今天的卡答錯進去的補救實驗、或從選單開的實驗，照常算加碼（證明上面不是空測）
+  s.labRuns.r2 = lab("menu", null);
+  s = run(s, B12, NOON(D), op("labComplete", { runId: "r2" }));
+  assert.equal(s.days[D].extraDone, true, "補做期間從選單開的實驗照常算加碼");
 });
 
 test("MK8 日曆的補做標記靠 days[那天].madeUp（作答紀錄截斷也不會誤標）；線上舊版核心讀寫後照留", () => {
   let s = doneToday(B12);
   s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));
-  s = run(s, B12, NOON(D), op("answer", { cardId: s.days[MK].planIds[0], ok: true }));
+  s = run(s, B12, NOON(D), op("answer", { cardId: s.days[MK].planIds[0], ok: true, makeup: MK }));
   assert.equal(s.days[MK].madeUp, D); assert.equal(s.days[D].madeUp, undefined, "正常練的日子沒有 madeUp");
   const o = OLD.reduce(s, op("answer", { cardId: s.days[MK].planIds[1], ok: true }), { bank: B12, now: NOON("2026-10-21") });
   assert.ok(!o.error); assert.equal(o.state.days[MK].madeUp, D, "舊版核心作答、跨日後 madeUp 照留");
@@ -1013,10 +1015,42 @@ test("MK9 存檔壞掉（days 不是物件）時讀檔檢查回報錯誤、不�
   });
 });
 
+// Codex 審 414134e 的兩個反例
+test("MK10 補做做完後，考考爸媽照常算今天加碼（session.makeup 還留著也一樣）", () => {
+  let s = doneToday(B12);
+  s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));
+  s.days[MK].planIds.forEach((id) => { s = run(s, B12, NOON(D), op("answer", { cardId: id, ok: true, makeup: MK })); });
+  assert.equal(s.session.makeup, MK); assert.equal(s.days[D].extraDone, false);
+  s = run(s, B12, NOON(D), op("teach", { cardId: s.days[D].planIds[0] }));
+  assert.equal(s.days[D].teach, 1); assert.equal(s.days[D].extraDone, true);
+});
+
+test("MK11 兩個分頁：A 停在今天的題（沒帶補做日）、B 開始補做；A 作答記在今天，不會記到補做那天", () => {
+  let s = doneToday(B12);
+  s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));
+  const todayCard = s.days[D].planIds[0];
+  s = run(s, B12, NOON(D), op("answer", { cardId: todayCard, ok: true }));
+  assert.deepEqual(s.days[MK].touched, [], "補做那天沒有被記到");
+  assert.deepEqual(C.missedDays(s, "2026-10-17", D).indexOf(MK) >= 0, true, "10/18 仍在待補清單");
+  // 反過來：作答帶著補做日，但共用回合已被別頁換掉 ⇒ 仍記在補做那天
+  const mkCard = s.days[MK].planIds[0];
+  s = run(s, B12, NOON(D), op("sessionStart", { kind: "redo", ids: [todayCard] }));
+  s = run(s, B12, NOON(D), op("answer", { cardId: mkCard, ok: true, makeup: MK }));
+  assert.deepEqual(s.days[MK].touched, [mkCard]);
+  // 帶的補做日不是補做過的日子 ⇒ 當作今天
+  s = run(s, B12, NOON(D), op("answer", { cardId: s.days[D].planIds[1], ok: true, makeup: "2026-10-17" }));
+  assert.equal(s.days["2026-10-17"], undefined);
+  // 帶的是當天正常練過（沒有 madeUp）的日子 ⇒ 也當作今天，不能寫進那天
+  s.days["2026-10-19"] = { planIds: ["c12"], doneIds: ["c12"], touched: ["c12"], extraDone: false, labRuns: 0, teach: 0, mood: null };
+  s = run(s, B12, NOON(D), op("answer", { cardId: "c11", ok: true, makeup: "2026-10-19" }));   // c11：今天沒碰過、也不在補做計畫
+  assert.deepEqual(s.days["2026-10-19"].touched, ["c12"]);
+  assert.ok(s.days[D].touched.indexOf("c11") >= 0, "記在今天");
+});
+
 test("MK5 補做回合跨午夜：隔天回合換成當天計畫，已補的那天保留", () => {
   let s = doneToday(B12);
   s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));
-  s = run(s, B12, NOON(D), op("answer", { cardId: s.days[MK].planIds[0], ok: true }));
+  s = run(s, B12, NOON(D), op("answer", { cardId: s.days[MK].planIds[0], ok: true, makeup: MK }));
   s = run(s, B12, NOON("2026-10-21"), op("tick"));
   assert.equal(s.session.makeup, undefined); assert.equal(s.days[MK].touched.length, 1);
   assert.deepEqual(C.checkState(s, B12), []);

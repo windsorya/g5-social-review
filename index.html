@@ -1220,8 +1220,10 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     syncSession(s, bank, today);
     pruneVanished(s, bank, today);
     var wasDone = dayCompleted(day);
-    // 只有計畫先完成，之後實際完成的才算加碼（矩陣 9、10、12）；補做回合裡做的（含補救實驗）不算今天加碼（Codex 審 b482558）
-    function extra() { if (wasDone && !(s.session && s.session.makeup)) day.extraDone = true; }
+    function extra() { if (wasDone) day.extraDone = true; }   // 只有計畫先完成，之後實際完成的才算加碼（矩陣 9、10、12）
+    // 這次操作屬於哪一天的補做：只認畫面出題時帶來的日子（action.makeup），不看共用的 session——
+    // 別的分頁換了回合、或補做早就做完，都不會把作答記錯天、也不會擋掉之後的一般加碼（Codex 審 414134e）。
+    function makeupDayOf(k) { return isDay(k) && k < today && s.days[k] && s.days[k].madeUp ? s.days[k] : null; }
 
     switch (action.type) {
       case "tick": break;
@@ -1273,7 +1275,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
         var sessKind = s.session && s.session.kinds[card.id];
         var variation = !!action.variation || sessKind === "variation";
         // 補做回合：「這天練過」記在補做那天（target）；間隔複習照今天算
-        var mkd = s.session && s.session.makeup && s.days[s.session.makeup] || null, target = mkd || day;
+        var mkd = makeupDayOf(action.makeup), target = mkd || day;
         var first = day.touched.indexOf(card.id) < 0 && (!mkd || mkd.touched.indexOf(card.id) < 0);
         var shaky = !action.ok || !!action.hint || !!action.unsure;
         cs.seen++;
@@ -1385,7 +1387,9 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
         if (r3.tasksDone.length < r3.tasks) return fail(state0, "TASKS_LEFT");
         r3.phase = "complete";
         day.labRuns++;
-        extra();
+        // 補做卡答錯進去的補救實驗是補做的一部分，不算今天加碼；其他實驗照常
+        var mkLab = r3.from === "wrong" && r3.card && Object.keys(s.days).some(function (k) { var dd = s.days[k]; return k < today && dd.madeUp === today && dd.planIds.indexOf(r3.card) >= 0; });
+        if (!mkLab) extra();
         if (r3.from === "wrong" && r3.card && s.session) {
           var orig = cardById(s, bank, r3.card);
           var v = orig ? pickVariation(s, bank, orig, action.variationId) : null;
@@ -1991,7 +1995,7 @@ function renderConcepts(){
 }
 // 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）：今天的卡做完後，日曆下方列出之前沒練的日子，按了補一份那天的新卡。
 // 補做過的日子在日曆上是淺綠色（核心在那天記 madeUp＝哪天補的）；連續天數照算。
-var MAKEUP_MSG={MAKEUP_TODAY_FIRST:"先把今天的卡做完，才能補做前面的日子。",MAKEUP_DAY:"這一天已經練過了，不用補。",MAKEUP_EMPTY:"現在沒有可以補做的卡了，每一張都練過也都會了。"};
+var MAKEUP_MSG={MAKEUP_TODAY_FIRST:"先把今天的卡做完，才能補做前面的日子。",MAKEUP_DAY:"這一天已經練過了，不用補。",MAKEUP_EMPTY:"現在沒有可以補做的卡：新卡都練過了，其他的卡不是今天練過、就是已經學會。明天再來補。"};
 function madeUp(s,k){return !!(s.days[k]&&s.days[k].madeUp);}
 function renderCal(){
   var s=S(), v=V(), cells=[], k=START;
@@ -2086,7 +2090,7 @@ function renderPractice(){
   if(!se||!se.queue.length||se.halted) return renderEnd();
   var id=se.queue[0], c=card(id);
   if(!c) return renderEnd();
-  ui={hint:false,cardId:id,variation:se.kinds[id]==="variation"};
+  ui={hint:false,cardId:id,variation:se.kinds[id]==="variation",makeup:se.makeup||null};   // 出題當下屬於哪一天的補做（作答時帶著，別的分頁換回合也不會記錯天）
   var con=CONCEPTS[c.concept], total=se.answered.length+se.queue.length, pos=se.answered.length+1;
   var h='<div class="qhead"><span>'+(se.kind==="review"?'<span class="tag" style="margin:0 6px 0 0">小考複習</span>':se.makeup?'<span class="tag" style="margin:0 6px 0 0">補做 '+md(se.makeup)+'</span>':'')+esc(UNITS[con.unit])+'・'+esc(con.title)+(ui.variation?'<span class="tag">同觀念換一題確認</span>':'')+'</span><span>'+pos+' / '+total+'</span></div><div class="bar"><i style="width:'+Math.round((pos-1)/total*100)+'%"></i></div>';
   h+=questionHtml(c,"practice");
@@ -2125,6 +2129,7 @@ function meta(){var u=$("#unsure");return {unsure:!!(u&&u.checked),hint:ui.hint}
 var pending=null;
 function submit(c,ok,m,selfGraded){
   var a={type:"answer",id:newId(),cardId:c.id,ok:ok,hint:!!m.hint,unsure:!!m.unsure,variation:!!ui.variation};
+  if(ui.makeup) a.makeup=ui.makeup;
   var r=act(a);
   if(!r.ok&&!r.dup&&r.error==="SAVE_PENDING"){
     $("#ansBox").insertAdjacentHTML("beforeend",'<div class="fb no" id="saveFail"><strong>上一步還沒存到這台裝置，這一題先不算</strong><span class="small">按上方的「再存一次」，存好以後再作答這一題。</span></div>');
