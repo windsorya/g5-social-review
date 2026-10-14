@@ -19,11 +19,21 @@ const MAX_SENTENCE = 40;   // 小五每句上限，與難題站 src/hard.js READ
 
 const units = [...new Set(B.CARDS.map((c) => c.concept))];   // 會出題的每個觀念
 
-test("標準①影片：每個會出題的觀念至少一段驗證過的影片，或寫明查不到的理由（noVideoReason 去空白 ≥20 字）", () => {
-  const ok = (v) => (Array.isArray(v) && v.length > 0 && v.every((x) => /^[A-Za-z0-9_-]{11}$/.test(x.id) && x.title && x.channel)) ||
-    (!!v && !Array.isArray(v) && typeof v.noVideoReason === "string" && v.noVideoReason.replace(/\s/g, "").length >= 20);
-  const missing = units.filter((k) => !ok(V[k]));
-  assert.deepEqual(missing, [], "沒有影片也沒有理由：" + missing.join("、"));
+// 2026-10-14 律師：「為何漏附影片……請日後避免再犯」⇒ 沒有影片只認律師核可（四站同一條）：
+//   { noVideoReason: 理由（去空白 ≥20 字）, ownerApproved: "YYYY-MM-DD 律師原話：「…」" }；只寫理由一律不過
+const videoOk = (v) => (Array.isArray(v) && v.length > 0 && v.every((x) => /^[A-Za-z0-9_-]{11}$/.test(x.id) && x.title && x.channel)) ||
+    (!!v && !Array.isArray(v) && typeof v.noVideoReason === "string" && v.noVideoReason.replace(/\s/g, "").length >= 20 &&
+     typeof v.ownerApproved === "string" && /^\d{4}-\d{2}-\d{2} 律師原話：「[^」]+」/.test(v.ownerApproved));
+test("標準①影片：每個會出題的觀念至少一段驗證過的影片；沒有影片只認律師核可（理由＋ownerApproved 原話）", () => {
+  const missing = units.filter((k) => !videoOk(V[k]));
+  assert.deepEqual(missing, [], "沒有影片，也沒有律師核可：" + missing.join("、"));
+});
+// 2026-10-14 律師「請日後避免再犯」：例外口必須真的關住——突變自檢
+test("標準①-自檢：沒有影片時，只寫理由不過、缺律師原話不過、理由＋律師原話才過", () => {
+  const why = "這個觀念找不到合適的影片，先看圖解和例句練習就好。";
+  assert.equal(videoOk({ noVideoReason: why }), false, "只寫理由卻放行");
+  assert.equal(videoOk({ noVideoReason: why, ownerApproved: "律師說可以" }), false, "核可沒有日期與原話卻放行");
+  assert.equal(videoOk({ noVideoReason: why, ownerApproved: "2026-10-14 律師原話：「這個觀念不用放影片」" }), true);
 });
 
 test("標準②圖：每個觀念的每一種說法都有圖", () => {
