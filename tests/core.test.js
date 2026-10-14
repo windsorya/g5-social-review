@@ -968,6 +968,51 @@ test("MK4 新卡用完改排練過但還沒畢業的卡；全部畢業才說沒�
   assert.equal(C.reduce(s, op("sessionStart", { kind: "makeup", day: "2026-10-17" }), env(b8, NOON("2026-10-22"))).error, "MAKEUP_EMPTY", "今天別次補做練過的卡不再排");
 });
 
+// Codex 審 b482558 的四個反例
+test("MK6 補做那天原本有實驗、考考爸媽、心情紀錄（沒答卡）：補做後照留，並記 madeUp＝今天", () => {
+  let s = doneToday(B12);
+  s.days[MK] = { planIds: [], doneIds: [], touched: [], extraDone: false, labRuns: 1, teach: 2, mood: "good" };
+  s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));
+  assert.equal(s.days[MK].labRuns, 1); assert.equal(s.days[MK].teach, 2); assert.equal(s.days[MK].mood, "good");
+  assert.equal(s.days[MK].madeUp, D); assert.equal(s.days[MK].planIds.length, 5);
+  assert.deepEqual(C.checkState(s, B12), []);
+});
+
+test("MK7 補做回合裡做補救實驗：今天不算加碼（extraDone 照舊 false）", () => {
+  const lab = { lab: "x", day: D, phase: "observe", prediction: null, predictionCorrect: null, answer: 0, tasks: 0, tasksDone: [], from: "menu", card: null };
+  let s = doneToday(B12);
+  s.labRuns.r1 = Object.assign({}, lab);
+  s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));
+  s = run(s, B12, NOON(D), op("labComplete", { runId: "r1" }));
+  assert.equal(s.labRuns.r1.phase, "complete", "實驗真的完成了（有經過 extra()）");
+  assert.equal(s.days[D].extraDone, false, "補做回合中完成實驗，今天不算加碼");
+  // 對照：不在補做回合時，同樣的實驗會算加碼（證明上面不是空測）
+  let t = doneToday(B12); t.labRuns.r1 = Object.assign({}, lab);
+  t = run(t, B12, NOON(D), op("labComplete", { runId: "r1" }));
+  assert.equal(t.days[D].extraDone, true);
+});
+
+test("MK8 日曆的補做標記靠 days[那天].madeUp（作答紀錄截斷也不會誤標）；線上舊版核心讀寫後照留", () => {
+  let s = doneToday(B12);
+  s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));
+  s = run(s, B12, NOON(D), op("answer", { cardId: s.days[MK].planIds[0], ok: true }));
+  assert.equal(s.days[MK].madeUp, D); assert.equal(s.days[D].madeUp, undefined, "正常練的日子沒有 madeUp");
+  const o = OLD.reduce(s, op("answer", { cardId: s.days[MK].planIds[1], ok: true }), { bank: B12, now: NOON("2026-10-21") });
+  assert.ok(!o.error); assert.equal(o.state.days[MK].madeUp, D, "舊版核心作答、跨日後 madeUp 照留");
+  const bad = JSON.parse(JSON.stringify(s)); bad.days[MK].madeUp = MK;
+  assert.ok(C.checkState(bad, B12).length > 0, "madeUp 不能是那天自己或更早");
+});
+
+test("MK9 存檔壞掉（days 不是物件）時讀檔檢查回報錯誤、不拋例外", () => {
+  let s = doneToday(B12);
+  s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));
+  [null, undefined, 5].forEach((v) => {
+    const bad = JSON.parse(JSON.stringify(s)); bad.days = v;
+    let errs; assert.doesNotThrow(() => { errs = C.checkState(bad, B12); });
+    assert.ok(errs.length > 0, String(v));
+  });
+});
+
 test("MK5 補做回合跨午夜：隔天回合換成當天計畫，已補的那天保留", () => {
   let s = doneToday(B12);
   s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));

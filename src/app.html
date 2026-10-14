@@ -445,9 +445,9 @@ function renderConcepts(){
   };});
 }
 // 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）：今天的卡做完後，日曆下方列出之前沒練的日子，按了補一份那天的新卡。
-// 補做過的日子在日曆上是淺綠色（那天的作答紀錄都是之後才做的＝補做）；連續天數照算。
+// 補做過的日子在日曆上是淺綠色（核心在那天記 madeUp＝哪天補的）；連續天數照算。
 var MAKEUP_MSG={MAKEUP_TODAY_FIRST:"先把今天的卡做完，才能補做前面的日子。",MAKEUP_DAY:"這一天已經練過了，不用補。",MAKEUP_EMPTY:"現在沒有可以補做的卡了，每一張都練過也都會了。"};
-function madeUp(s,k){return !s.log.some(function(e){return e.d===k;});}
+function madeUp(s,k){return !!(s.days[k]&&s.days[k].madeUp);}
 function renderCal(){
   var s=S(), v=V(), cells=[], k=START;
   while(k<=EXAM){

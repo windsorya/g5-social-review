@@ -199,7 +199,8 @@
     syncSession(s, bank, today);
     pruneVanished(s, bank, today);
     var wasDone = dayCompleted(day);
-    function extra() { if (wasDone) day.extraDone = true; }   // 只有計畫先完成，之後實際完成的才算加碼（矩陣 9、10、12）
+    // 只有計畫先完成，之後實際完成的才算加碼（矩陣 9、10、12）；補做回合裡做的（含補救實驗）不算今天加碼（Codex 審 b482558）
+    function extra() { if (wasDone && !(s.session && s.session.makeup)) day.extraDone = true; }
 
     switch (action.type) {
       case "tick": break;
@@ -207,14 +208,17 @@
       case "sessionStart": {
         if (action.kind === "makeup") {
           // 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）：今天的卡做完後，選一個之前沒練的日子補一份。
-          // 存法不加新欄位（舊版頁面的讀檔檢查才不會判壞）：補做那天照一般的 days[那天] 格式存，回合是 kind "plan" 加 makeup:那天。
+          // 存法只加舊版讀檔檢查不看的選填欄位（舊版頁面不判壞、讀寫後照留，tests MK2／MK8 用線上舊版核心驗）：
+          //   days[那天].madeUp＝哪一天補的（日曆靠它標補做色；不用作答紀錄推，因為紀錄只留 600 筆）；回合是 kind "plan" 加 makeup:那天。
+          // 那天原本有的紀錄（實驗、考考爸媽、心情）照留，只填上補做的卡（Codex 審 b482558）。
           // 卡片的間隔複習一律用今天的日期算（她真的是今天練的），只有「這天練過」記在補做那天。
           var mk = action.day;
           if (!isDay(mk) || mk >= today || (s.days[mk] && s.days[mk].touched.length)) return fail(state0, "MAKEUP_DAY");
           if (!dayCompleted(day)) return fail(state0, "MAKEUP_TODAY_FIRST");
           var mplan = makeupPlan(s, bank, day, today, mk);
           if (!mplan.length) return fail(state0, "MAKEUP_EMPTY");
-          var md0 = blankDay(); md0.planIds = mplan; s.days[mk] = md0;
+          var md0 = s.days[mk] || (s.days[mk] = blankDay());
+          md0.planIds = mplan; md0.doneIds = []; md0.madeUp = today;
           s.session = { day: today, kind: "plan", queue: stuckLast(s, bank, sessionOrder(s, bank, today, mplan)), answered: [], wrong: [], kinds: {}, makeup: mk };
           s.session.size = s.session.queue.length;
         } else if (action.kind === "redo" || action.kind === "review") {
@@ -528,7 +532,8 @@
       var d = o.days[k];
       if (!isDay(k) || !isObj(d) || !strList(d.planIds) || !strList(d.doneIds) || !strList(d.touched) ||
           !isBool(d.extraDone) || !isNat(d.labRuns) || !isNat(d.teach) ||
-          !(d.mood === null || ["good", "ok", "tired"].indexOf(d.mood) >= 0)) { bad("day " + k); return; }
+          !(d.mood === null || ["good", "ok", "tired"].indexOf(d.mood) >= 0) ||
+          (d.madeUp !== undefined && (!isDay(d.madeUp) || d.madeUp <= k))) { bad("day " + k); return; }
       if (!d.doneIds.every(function (id) { return d.planIds.indexOf(id) >= 0; })) bad("day " + k + " done⊄plan");
       if (!uniqList(d.planIds) || !uniqList(d.doneIds) || !uniqList(d.touched)) bad("day " + k + " duplicate");
     });
@@ -545,7 +550,7 @@
           !strList(se.answered) || !strList(se.wrong) || !isObj(se.kinds) ||
           (se.size !== undefined && !isNat(se.size)) || (se.halted !== undefined && !isBool(se.halted)) ||
           (se.focus !== undefined && !bank.concepts[se.focus]) ||
-          (se.makeup !== undefined && (se.kind !== "plan" || !isDay(se.makeup) || !isObj(o.days[se.makeup])))) bad("session");
+          (se.makeup !== undefined && (se.kind !== "plan" || !isDay(se.makeup) || !isObj(o.days) || !isObj(o.days[se.makeup])))) bad("session");
       else if (!uniqList(se.queue) || !uniqList(se.answered) || !uniqList(se.wrong)) bad("session duplicate");
     }
     if (!Array.isArray(o.log) || !o.log.every(function (e) {
