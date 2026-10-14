@@ -99,14 +99,22 @@
     var pick = {}; due.concat(fresh.slice(0, quota)).forEach(function (id) { pick[id] = 1; });
     return cards.filter(function (c) { return pick[c.id]; }).map(function (c) { return c.id; });   // 固定題庫順序
   }
-  // 補做那天的卡：先排還沒練過的新卡（照那天的新卡數量，不重複今天的計畫）；新卡用完了，就排練過但還沒畢業、今天沒碰過的卡
-  function makeupPlan(state, bank, today0, td, mk) {
-    var cards = enabledCards(state, bank), n = newQuota(mk);
-    var fresh = cards.filter(function (c) { return cardState(state, c.id).seen === 0 && today0.planIds.indexOf(c.id) < 0; }).map(function (c) { return c.id; });
+
+  /* ---------- 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）----------
+   * 結算制（4agent 會診 4A-20261014-makeup 後定案；前三版「每次作答決定記到哪一天」被 Codex 連 3 輪 FAIL：
+   * 多分頁共用回合、跨午夜換回合、補救實驗拖到隔天，都會把作答記錯天或誤報完成）。
+   *  ① 補做回合＝一般的 review 回合（舊版頁面認得），只多選填 session.makeup＝要補的日子（畫面標題用）。
+   *     回合中的作答、補救實驗、再練答錯的，全部照原本「今天」的規則（她今天確實多練了，算今天加碼）。
+   *  ② 回合做完時畫面送 makeupClaim{day, ids}：一次把「今天真的練過、不在今天計畫裡、沒被別的補做日用掉」的卡
+   *     記到那天（touched＝planIds＝doneIds＝這些卡，madeUp＝今天）。只看今天的作答紀錄與已補的日子，不看共用回合，
+   *     所以別的分頁換了回合、跨過午夜，都不會記錯天；一張都不合格就不寫，那天照樣可以再補（不留半成品）。
+   */
+  function makeupCards(state, bank, today0, td, mk) {
+    var cards = enabledCards(state, bank), n = newQuota(mk), hit = {};
+    state.log.forEach(function (e) { if (e.d === td) hit[e.card] = 1; });
+    var fresh = cards.filter(function (c) { return cardState(state, c.id).seen === 0 && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
     if (fresh.length) return fresh.slice(0, n);
-    var hit = {};
-    state.log.forEach(function (e) { if (e.d === td) hit[e.card] = 1; });   // 今天任何回合（含別次補做）練過的卡不再排
-    var old = cards.filter(function (c) { var cs = cardState(state, c.id); return cs.seen > 0 && !retired(cs) && today0.touched.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
+    var old = cards.filter(function (c) { var cs = cardState(state, c.id); return cs.seen > 0 && !retired(cs) && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
     return reviewOrder(state, bank, old).slice(0, n);
   }
   // 可以補做的日子：從 start 到昨天、那天一張都沒練過
@@ -114,6 +122,13 @@
     var out = [], k = start;
     while (k < today0) { if (!(state.days[k] && state.days[k].touched.length)) out.push(k); k = addDays(k, 1); }
     return out;
+  }
+  // 結算時哪些卡算數：今天的作答紀錄裡有、不在今天計畫裡、沒被今天已結算的別的補做日用掉
+  function claimable(state, td, ids) {
+    var hit = {}, used = {}, plan = (state.days[td] && state.days[td].planIds) || [];
+    state.log.forEach(function (e) { if (e.d === td) hit[e.card] = 1; });
+    Object.keys(state.days).forEach(function (k) { var d = state.days[k]; if (d.madeUp === td) d.touched.forEach(function (id) { used[id] = 1; }); });
+    return uniq(ids.filter(function (id) { return isStr(id) && hit[id] && plan.indexOf(id) < 0 && !used[id]; }));
   }
   // 每日第一次操作就把當天計畫固定下來；之後匯入、開放單元都等隔天才納入（矩陣 29）
   function ensureDay(state, bank, day) {
@@ -200,29 +215,18 @@
     pruneVanished(s, bank, today);
     var wasDone = dayCompleted(day);
     function extra() { if (wasDone) day.extraDone = true; }   // 只有計畫先完成，之後實際完成的才算加碼（矩陣 9、10、12）
-    // 這次操作屬於哪一天的補做：只認畫面出題時帶來的日子（action.makeup），不看共用的 session——
-    // 別的分頁換了回合、或補做早就做完，都不會把作答記錯天、也不會擋掉之後的一般加碼（Codex 審 414134e）。
-    function makeupDayOf(k) { return isDay(k) && k < today && s.days[k] && s.days[k].madeUp ? s.days[k] : null; }
 
     switch (action.type) {
       case "tick": break;
 
       case "sessionStart": {
         if (action.kind === "makeup") {
-          // 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）：今天的卡做完後，選一個之前沒練的日子補一份。
-          // 存法只加舊版讀檔檢查不看的選填欄位（舊版頁面不判壞、讀寫後照留，tests MK2／MK8 用線上舊版核心驗）：
-          //   days[那天].madeUp＝哪一天補的（日曆靠它標補做色；不用作答紀錄推，因為紀錄只留 600 筆）；回合是 kind "plan" 加 makeup:那天。
-          // 那天原本有的紀錄（實驗、考考爸媽、心情）照留，只填上補做的卡（Codex 審 b482558）。
-          // 卡片的間隔複習一律用今天的日期算（她真的是今天練的），只有「這天練過」記在補做那天。
           var mk = action.day;
           if (!isDay(mk) || mk >= today || (s.days[mk] && s.days[mk].touched.length)) return fail(state0, "MAKEUP_DAY");
           if (!dayCompleted(day)) return fail(state0, "MAKEUP_TODAY_FIRST");
-          var mplan = makeupPlan(s, bank, day, today, mk);
-          if (!mplan.length) return fail(state0, "MAKEUP_EMPTY");
-          var md0 = s.days[mk] || (s.days[mk] = blankDay());
-          md0.planIds = mplan; md0.doneIds = []; md0.madeUp = today;
-          s.session = { day: today, kind: "plan", queue: stuckLast(s, bank, sessionOrder(s, bank, today, mplan)), answered: [], wrong: [], kinds: {}, makeup: mk };
-          s.session.size = s.session.queue.length;
+          var mq = makeupCards(s, bank, day, today, mk);
+          if (!mq.length) return fail(state0, "MAKEUP_EMPTY");
+          s.session = { day: today, kind: "review", queue: stuckLast(s, bank, sessionOrder(s, bank, today, mq)), answered: [], wrong: [], kinds: {}, makeup: mk };
         } else if (action.kind === "redo" || action.kind === "review") {
           // redo＝再練答錯的；review＝小考前把整個單元／觀念練一次。作答規則一樣，不改當日計畫與完成判定
           var ids = uniq((Array.isArray(action.ids) ? action.ids : []).filter(function (id) { return !!cardById(s, bank, id); }));
@@ -253,9 +257,7 @@
         var cs = s.cards[card.id] = clone(cardState(s, card.id));
         var sessKind = s.session && s.session.kinds[card.id];
         var variation = !!action.variation || sessKind === "variation";
-        // 補做回合：「這天練過」記在補做那天（target）；間隔複習照今天算
-        var mkd = makeupDayOf(action.makeup), target = mkd || day;
-        var first = day.touched.indexOf(card.id) < 0 && (!mkd || mkd.touched.indexOf(card.id) < 0);
+        var first = day.touched.indexOf(card.id) < 0;
         var shaky = !action.ok || !!action.hint || !!action.unsure;
         cs.seen++;
         if (cs.needsRecheck) delete cs.needsRecheck;
@@ -271,13 +273,11 @@
           cs.due = addDays(today, 1);   // 第一次見到就是變式或重答：至少明天要回來
         }
         if (cs.goodDays.length > 3) cs.goodDays = cs.goodDays.slice(-3);
-        if (first) target.touched.push(card.id);
-        var inPlan = target.planIds.indexOf(card.id) >= 0;
-        if (inPlan && target.doneIds.indexOf(card.id) < 0) target.doneIds.push(card.id);
-        if (!mkd) {
-          if (!inPlan || !first) extra();
-          else if (wasDone) extra();
-        }
+        if (first) day.touched.push(card.id);
+        var inPlan = day.planIds.indexOf(card.id) >= 0;
+        if (inPlan && day.doneIds.indexOf(card.id) < 0) day.doneIds.push(card.id);
+        if (!inPlan || !first) extra();
+        else if (wasDone) extra();
         openExit(s, card.concept, today);
         pushCap(s.log, { op: action.id, d: today, card: card.id, c: card.concept, ok: action.ok,
                          hint: !!action.hint, unsure: !!action.unsure, variation: variation, first: first }, LOG_KEEP);
@@ -296,6 +296,17 @@
           delete s.session.kinds[card.id];
         }
         info.first = first; info.variation = variation;
+        break;
+      }
+
+      case "makeupClaim": {
+        var ck = action.day;
+        if (!isDay(ck) || ck >= today || (s.days[ck] && s.days[ck].touched.length)) return fail(state0, "MAKEUP_DAY");
+        var got = claimable(s, today, Array.isArray(action.ids) ? action.ids : []);
+        if (!got.length) return fail(state0, "MAKEUP_NONE");
+        var cd = s.days[ck] || (s.days[ck] = blankDay());   // 那天原本的實驗、考考爸媽、心情紀錄照留
+        cd.planIds = got.slice(); cd.doneIds = got.slice(); cd.touched = got.slice(); cd.madeUp = today;
+        info.claimed = got.length;
         break;
       }
 
@@ -366,9 +377,7 @@
         if (r3.tasksDone.length < r3.tasks) return fail(state0, "TASKS_LEFT");
         r3.phase = "complete";
         day.labRuns++;
-        // 補做卡答錯進去的補救實驗是補做的一部分，不算今天加碼；其他實驗照常
-        var mkLab = r3.from === "wrong" && r3.card && Object.keys(s.days).some(function (k) { var dd = s.days[k]; return k < today && dd.madeUp === today && dd.planIds.indexOf(r3.card) >= 0; });
-        if (!mkLab) extra();
+        extra();
         if (r3.from === "wrong" && r3.card && s.session) {
           var orig = cardById(s, bank, r3.card);
           var v = orig ? pickVariation(s, bank, orig, action.variationId) : null;
@@ -497,8 +506,6 @@
   function endTitle(v) {
     // R9（4agent）：停輪是要爸媽陪看的訊號，優先於每日完成／空計畫，不能被蓋掉
     if (v.session && v.session.halted) return "這一輪先停在這裡";
-    if (v.session && v.session.makeup && !v.session.queue.length && v.session.answered.length)
-      return (+v.session.makeup.slice(5, 7)) + "/" + (+v.session.makeup.slice(8, 10)) + " 補做完成";
     if (!v.planIds.length) return "今天沒有排定卡片";
     if (v.completed) return "今天的卡片都做完了";
     if (v.session && !v.session.queue.length && v.session.answered.length) return "這一輪完成了";
@@ -537,7 +544,7 @@
       if (!isDay(k) || !isObj(d) || !strList(d.planIds) || !strList(d.doneIds) || !strList(d.touched) ||
           !isBool(d.extraDone) || !isNat(d.labRuns) || !isNat(d.teach) ||
           !(d.mood === null || ["good", "ok", "tired"].indexOf(d.mood) >= 0) ||
-          (d.madeUp !== undefined && (!isDay(d.madeUp) || d.madeUp <= k))) { bad("day " + k); return; }
+          (d.madeUp !== undefined && (!isDay(d.madeUp) || d.madeUp <= k || !d.touched.length))) { bad("day " + k); return; }
       if (!d.doneIds.every(function (id) { return d.planIds.indexOf(id) >= 0; })) bad("day " + k + " done⊄plan");
       if (!uniqList(d.planIds) || !uniqList(d.doneIds) || !uniqList(d.touched)) bad("day " + k + " duplicate");
     });
@@ -554,7 +561,7 @@
           !strList(se.answered) || !strList(se.wrong) || !isObj(se.kinds) ||
           (se.size !== undefined && !isNat(se.size)) || (se.halted !== undefined && !isBool(se.halted)) ||
           (se.focus !== undefined && !bank.concepts[se.focus]) ||
-          (se.makeup !== undefined && (se.kind !== "plan" || !isDay(se.makeup) || !isObj(o.days) || !isObj(o.days[se.makeup])))) bad("session");
+          (se.makeup !== undefined && (se.kind !== "review" || !isDay(se.makeup)))) bad("session");
       else if (!uniqList(se.queue) || !uniqList(se.answered) || !uniqList(se.wrong)) bad("session duplicate");
     }
     if (!Array.isArray(o.log) || !o.log.every(function (e) {

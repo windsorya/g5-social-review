@@ -354,7 +354,7 @@ function renderHome(){
   var inRound=se&&se.day===v.today&&se.queue.length&&!se.halted&&se.answered.length>0;
   // R1（4agent 2026-10-11）：小考複習進行中不得佔住首頁——「開始今天的練習」一律在，複習續接另給一顆
   var isReview=inRound&&se.kind==="review";
-  var onLabel=!inRound?'':isReview?'繼續小考複習（還有 '+se.queue.length+' 題）':'繼續這一輪（還有 '+se.queue.length+' 張）';
+  var onLabel=!inRound?'':se.makeup?'繼續補做 '+md(se.makeup)+'（還有 '+se.queue.length+' 題）':isReview?'繼續小考複習（還有 '+se.queue.length+' 題）':'繼續這一輪（還有 '+se.queue.length+' 張）';
   var cont=inRound?'<div class="row" style="justify-content:center"><button class="btn'+(isReview?' ghost':'')+'" type="button" id="goOn">'+onLabel+'</button></div>':'';
   if(!v.planIds.length){
     h='<div class="done"><b class="t">今天沒有排定卡片</b><p class="muted" style="margin:0">可以點下面的觀念看解說，或「考考爸媽」。</p>'+cont+'<div class="row" style="justify-content:center"><button class="btn ghost" type="button" id="goTeach">考考爸媽</button></div></div>';
@@ -446,7 +446,7 @@ function renderConcepts(){
 }
 // 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）：今天的卡做完後，日曆下方列出之前沒練的日子，按了補一份那天的新卡。
 // 補做過的日子在日曆上是淺綠色（核心在那天記 madeUp＝哪天補的）；連續天數照算。
-var MAKEUP_MSG={MAKEUP_TODAY_FIRST:"先把今天的卡做完，才能補做前面的日子。",MAKEUP_DAY:"這一天已經練過了，不用補。",MAKEUP_EMPTY:"現在沒有可以補做的卡：新卡都練過了，其他的卡不是今天練過、就是已經學會。明天再來補。"};
+var MAKEUP_MSG={MAKEUP_TODAY_FIRST:"先把今天的卡做完，才能補做前面的日子。",MAKEUP_DAY:"這一天已經練過了，不用補。",MAKEUP_EMPTY:"現在沒有可以補做的卡：新卡都練過了，其他的卡不是今天練過、就是已經學會。明天再來補。",MAKEUP_NONE:"這一輪的題目沒辦法算到那一天（可能另一個分頁已經用掉，或跨過半夜了）。那一天還是可以再補一次。"};
 function madeUp(s,k){return !!(s.days[k]&&s.days[k].madeUp);}
 function renderCal(){
   var s=S(), v=V(), cells=[], k=START;
@@ -461,7 +461,7 @@ function renderCal(){
   if(mkEl){
     mkEl.innerHTML=!miss.length?'':!v.completed?'<span class="small muted">前面有 '+miss.length+' 天沒練。今天的卡做完後，可以在這裡補做。</span>':
       '<span class="small muted">補做前面沒練的日子（每天補一份新卡）：</span><div class="row">'+miss.map(function(x){return '<button class="btn ghost sm" type="button" data-mk="'+x+'">補做 '+md(x)+'</button>';}).join("")+'</div>';
-    mkEl.querySelectorAll("button[data-mk]").forEach(function(b){b.onclick=function(){var r=beginRound({type:"sessionStart",kind:"makeup",day:b.dataset.mk});if(!r.ok&&r.error)toast(MAKEUP_MSG[r.error]||"現在不能補做");};});
+    mkEl.querySelectorAll("button[data-mk]").forEach(function(b){b.onclick=function(){lastReview=null;var r=beginRound({type:"sessionStart",kind:"makeup",day:b.dataset.mk});if(!r.ok&&r.error)toast(MAKEUP_MSG[r.error]||"現在不能補做");};});
   }
   var n=0; k=v.today;
   if(!(s.days[k]&&s.days[k].touched.length)) k=C.addDays(k,-1);
@@ -541,9 +541,9 @@ function renderPractice(){
   if(!se||!se.queue.length||se.halted) return renderEnd();
   var id=se.queue[0], c=card(id);
   if(!c) return renderEnd();
-  ui={hint:false,cardId:id,variation:se.kinds[id]==="variation",makeup:se.makeup||null};   // 出題當下屬於哪一天的補做（作答時帶著，別的分頁換回合也不會記錯天）
+  ui={hint:false,cardId:id,variation:se.kinds[id]==="variation"};
   var con=CONCEPTS[c.concept], total=se.answered.length+se.queue.length, pos=se.answered.length+1;
-  var h='<div class="qhead"><span>'+(se.kind==="review"?'<span class="tag" style="margin:0 6px 0 0">小考複習</span>':se.makeup?'<span class="tag" style="margin:0 6px 0 0">補做 '+md(se.makeup)+'</span>':'')+esc(UNITS[con.unit])+'・'+esc(con.title)+(ui.variation?'<span class="tag">同觀念換一題確認</span>':'')+'</span><span>'+pos+' / '+total+'</span></div><div class="bar"><i style="width:'+Math.round((pos-1)/total*100)+'%"></i></div>';
+  var h='<div class="qhead"><span>'+(se.makeup?'<span class="tag" style="margin:0 6px 0 0">補做 '+md(se.makeup)+'</span>':se.kind==="review"?'<span class="tag" style="margin:0 6px 0 0">小考複習</span>':'')+esc(UNITS[con.unit])+'・'+esc(con.title)+(ui.variation?'<span class="tag">同觀念換一題確認</span>':'')+'</span><span>'+pos+' / '+total+'</span></div><div class="bar"><i style="width:'+Math.round((pos-1)/total*100)+'%"></i></div>';
   h+=questionHtml(c,"practice");
   var tools='<div class="tools"><label><input type="checkbox" id="unsure"> 我不太確定</label>'+(c.hint?'<button class="btn ghost sm" type="button" id="hintBtn">給我一點提示</button>':'')+'</div><div class="hint" id="hintBox" hidden></div>';
   if(c.type==="map"){
@@ -580,7 +580,6 @@ function meta(){var u=$("#unsure");return {unsure:!!(u&&u.checked),hint:ui.hint}
 var pending=null;
 function submit(c,ok,m,selfGraded){
   var a={type:"answer",id:newId(),cardId:c.id,ok:ok,hint:!!m.hint,unsure:!!m.unsure,variation:!!ui.variation};
-  if(ui.makeup) a.makeup=ui.makeup;
   var r=act(a);
   if(!r.ok&&!r.dup&&r.error==="SAVE_PENDING"){
     $("#ansBox").insertAdjacentHTML("beforeend",'<div class="fb no" id="saveFail"><strong>上一步還沒存到這台裝置，這一題先不算</strong><span class="small">按上方的「再存一次」，存好以後再作答這一題。</span></div>');
@@ -711,8 +710,15 @@ function renderEnd(){
   screen="end"; leaveLab();
   var v=V(), se=v.session, el=$("#main");
   if(!se) return renderHome();
-  var title=C.endTitle(v)||"這一輪完成了", right=se.answered.length-se.wrong.length;
-  el.innerHTML='<div class="done"><b class="t">'+esc(title)+'</b>'+
+  // 補做回合做完：一次結算（核心只認今天真的練過、沒被用掉的卡）；已結算過的重畫不再送
+  var mkMsg="";
+  if(se.makeup&&!se.queue.length&&!se.halted){
+    var dd=S().days[se.makeup];
+    if(!(dd&&dd.madeUp)){var cr=act({type:"makeupClaim",day:se.makeup,ids:se.answered.slice()});if(!cr.ok&&cr.error&&MAKEUP_MSG[cr.error])mkMsg=MAKEUP_MSG[cr.error];}
+    dd=S().days[se.makeup];
+  }
+  var title=se.makeup&&!se.queue.length&&!se.halted&&dd&&dd.madeUp?md(se.makeup)+" 補做完成":(C.endTitle(v)||"這一輪完成了"), right=se.answered.length-se.wrong.length;
+  el.innerHTML='<div class="done"><b class="t">'+esc(title)+'</b>'+(mkMsg?'<p class="muted" style="margin:0">'+esc(mkMsg)+'</p>':'')+
     '<p style="margin:0">這一輪做了 '+se.answered.length+' 張'+(se.answered.length?'，第一次就答對 '+Math.max(0,right)+' 張':'')+'。</p>'+
     (v.completed?'':v.planIds.length?'<p class="muted" style="margin:0">今天的卡片完成 '+v.M.cardProgress.done+' / '+v.M.cardProgress.planned+' 張，還有 '+v.remainingIds.length+' 張，等一下想做再按開始。</p>':'')+
     '<div class="row" style="justify-content:center">'+(!v.completed&&v.remainingIds.length?'<button class="btn" type="button" id="goMore">繼續做剩下的 '+v.remainingIds.length+' 張</button>':'')+

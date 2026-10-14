@@ -61,7 +61,8 @@ def flow(browser, label, device=None):
     check(f"{label} 補做4 題目上方標「補做 10/13」", "補做 10/13" in page.inner_text("#main .qhead"), page.inner_text("#main")[:120])
     check(f"{label} 補做5 做完顯示「10/13 補做完成」", finish(page, "10/13 補做完成"), page.inner_text("#main")[:160])
     st = json.loads(page.evaluate(f"localStorage.getItem('{KEY}')"))
-    check(f"{label} 補做6 存檔：10/13 記成練過、今天的紀錄不變", len(st["days"]["2026-10-13"]["touched"]) > 0 and st["days"]["2026-10-14"]["touched"] == today["touched"] and st["days"]["2026-10-14"]["extraDone"] == today["extraDone"], st["days"])
+    d13 = st["days"]["2026-10-13"]
+    check(f"{label} 補做6 存檔：10/13 結算成練過（madeUp＝10/14、touched＝doneIds）、今天計畫不變", len(d13["touched"]) > 0 and d13.get("madeUp") == "2026-10-14" and sorted(d13["touched"]) == sorted(d13["doneIds"]) and st["days"]["2026-10-14"]["planIds"] == today["planIds"], st["days"])
     page.get_by_role("button", name="回首頁").first.click()
     cls = page.locator("#cal i").first.get_attribute("class") or ""
     check(f"{label} 補做7 日曆 13 號變補做色（on mk）、沒有補做按鈕了", "on" in cls and "mk" in cls and page.locator("#makeup button").count() == 0, cls)
