@@ -2196,7 +2196,7 @@ function renderHome(){
   on("#goLight",function(){beginRound({type:"sessionStart",size:3});});
   on("#goOn",function(){var se2=V().session;if(se2&&se2.makeup)myMakeup=se2.makeup;startRound();});   // 按「繼續補做」＝本分頁接手這份補做
   on("#goTeach",function(){renderTeach();});
-  on("#goRedo",function(){var w=V().session.wrong.slice();beginRound({type:"sessionStart",kind:"redo",ids:w});});
+  on("#goRedo",function(){var se2=V().session;if(!se2){renderHome();return;}beginRound({type:"sessionStart",kind:"redo",ids:se2.wrong.slice()});});   // 存檔被別處清掉後按舊畫面的按鈕：照磁碟現況回首頁，不拋錯（Codex 審 g5-sci-review 4d8b1e0，四站同型）
   renderSide();
 }
 // 小考複習：把整個單元（或一個觀念）排成一輪；作答照規則記分、隔天照樣複習，不改今天的計畫
@@ -2555,7 +2555,7 @@ function renderEnd(){
     '<div style="display:grid;gap:8px;justify-items:center"><span class="small muted">今天練習的感覺？（可以不選）</span><div class="moods" id="moods">'+
     ["good","ok","tired"].map(function(m){return '<button type="button" data-m="'+m+'" aria-label="'+MOOD_NAME[m]+'"'+(v.day.mood===m?' class="on"':'')+'>'+FACES[m]+'</button>';}).join("")+'</div></div></div>';
   on("#goMore",function(){beginRound({type:"sessionStart"});});
-  on("#goRedo",function(){var w=V().session.wrong.slice();beginRound({type:"sessionStart",kind:"redo",ids:w});});
+  on("#goRedo",function(){var se2=V().session;if(!se2){renderHome();return;}beginRound({type:"sessionStart",kind:"redo",ids:se2.wrong.slice()});});   // 存檔被別處清掉後按舊畫面的按鈕：照磁碟現況回首頁，不拋錯（Codex 審 g5-sci-review 4d8b1e0，四站同型）
   on("#goTeach",function(){renderTeach();});
   on("#goHome",renderHome);
   on("#goSeg",function(){startReview(lastReview,false);});

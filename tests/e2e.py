@@ -361,6 +361,26 @@ def flow_lab_retry_resume(browser, label, device=None):
     ctx.close()
 
 
+def flow_redo_after_external_clear(browser):
+    """Codex 審 g5-sci-review 4d8b1e0（四站同型）：做完含答錯題的一輪 → 存檔被別處清掉 → 切回頁面（只重畫側欄，結束畫面還在）
+    → 按「再練答錯的」，舊版 V().session.wrong 讀 null 拋 TypeError、按鈕沒反應。"""
+    ctx, pg, errors = open_page(browser, {"viewport": {"width": 390, "height": 844}})
+    pg.locator("#goLight").click(); pg.wait_for_selector("#main .q")
+    answer(pg, False); pg.locator('#errq button[data-k=""]').click()
+    for _ in range(8):
+        if pg.locator("#goRedo").count():
+            break
+        if pg.locator("#next").count() and pg.locator("#next").is_visible():
+            pg.locator("#next").click()
+        elif pg.locator("#main .q").count():
+            answer(pg, True)
+    check("清檔前：一輪結束畫面有「再練答錯的 1 張」", "再練答錯的 1 張" in pg.inner_text("#main"), pg.inner_text("#main")[:160])
+    pg.evaluate("localStorage.removeItem('g5soc.v1'); document.dispatchEvent(new Event('visibilitychange')); 0")
+    pg.locator("#goRedo").click()
+    check("存檔被別處清掉後按舊畫面的「再練答錯的」：不拋錯、回到首頁", not errors and pg.locator("#goAll").count() == 1, errors or pg.inner_text("#main")[:160])
+    ctx.close()
+
+
 def flow_review(browser):
     ctx, pg, errors = open_page(browser)
     check("小考複習按鈕寫「第 2 單元 臺灣的自然環境與生活」", "第 2 單元 臺灣的自然環境與生活" in pg.locator("#main .review").inner_text(), pg.locator("#main .review").inner_text()[:200])
@@ -447,6 +467,7 @@ def main():
         flow_main(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True, "device_scale_factor": 2})
         flow_concepts(cr, "手機390", {"viewport": {"width": 390, "height": 844}, "is_mobile": True, "has_touch": True})
         flow_review(cr)
+        flow_redo_after_external_clear(cr)
         flow_upload(cr, "社會", "g5-social-review", "G5SocBank")
         cr.close()
         wk = p.webkit.launch()
