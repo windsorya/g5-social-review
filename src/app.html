@@ -180,7 +180,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
 .helplink{display:grid;gap:2px;background:var(--card);border:2px solid var(--pri);border-radius:16px;padding:14px 18px;color:var(--ink);text-decoration:none;box-shadow:var(--shadow);min-height:48px}
 .helplink b{font-family:var(--f-display);font-weight:400;font-size:21px;color:var(--pri)}
 .helplink span{font-size:15px;color:var(--muted)}
-/* 探險地圖（2026-10-14，與自然站 #1725 同一套 CSS）：觀念依序是站，開花＝走過；旁邊的成長圖走過幾站就長到第幾階 */
+/* 探險地圖（2026-10-14，與自然站 #1725 同一套 CSS）：觀念依序是站，長葉（題目全部做過）＝走過；旁邊的成長圖走過幾站就長到第幾階 */
 .mapbox{background:var(--card);border:2px solid var(--line-soft);border-radius:var(--r);padding:16px;box-shadow:var(--shadow);display:grid;gap:12px;min-width:0}
 .maphead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px}
 .maphead h2{font-size:22px}
@@ -199,6 +199,10 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
 .stn .meta{display:grid;gap:3px;justify-items:center;min-width:0}
 .stn .nm{font-size:15px;line-height:1.3;letter-spacing:0;word-break:keep-all}
 .stn .u{display:none;font-size:15px;color:var(--muted)}
+/* 2026-10-14：每站「做過 x／y 題」（放書規則改成做完題目就放）——寬畫面也要看得到，不跟著 .u 藏起來 */
+.stn .pg{font-size:15px;line-height:1.25;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.stn.done .pg{color:var(--leaf);font-weight:700}
+.stn .pgl{display:none}
 .stn .tag{font-size:15px;line-height:1.25;font-weight:700;color:var(--sun-deep);background:var(--sun-soft);border-radius:8px;padding:2px 6px;max-width:4.6em}
 .stn.done .dot{background:var(--leaf);border-color:var(--leaf);color:var(--on-leaf)}
 .stn.now .dot{background:var(--sunball);border-color:var(--sun-deep);color:var(--on-sun);box-shadow:0 0 0 6px var(--sun-soft)}
@@ -238,6 +242,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
   .stn .meta{justify-items:start}
   .stn .nm{max-width:none;font-size:17px}
   .stn .u{display:block}
+  .stn .pgl{display:block} .stn .pgs{display:none}
   .stn .tag{max-width:none}
 }
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
@@ -402,12 +407,14 @@ function banners(){
 }
 
 /* ---------- 探險地圖＋成長圖（2026-10-14，邏輯與自然站 #1725 相同；成長圖依科目換，見 src/map.js） ---------- */
-// 走過一站＝觀念卡到「開花了」以上（view().stages ≥ 3，與觀念卡同一份 stageOf）；只讀，不寫 作答存檔。
+// 走過一站＝觀念卡到「長葉了」以上＝這一站的題目每題都做過一次（view().stages ≥ MAPX.BLOOM＝2，與觀念卡同一份 stageOf）；只讀，不寫 作答存檔。
+// 2026-10-14 律師轉述孩子問「達成什麼條件才能放一本書」：原本要開花（爸媽考出口題通過）才放書，改成做完題目就放；每站另標「做過 x／y 題」。
 // 「上次看到第幾階」存在獨立 key 本站 mapSeen（每台裝置的觀看紀錄）；store.watches() 只看 作答存檔，不會觸發外部變更偵測。
 // mapSeenMem：這一頁自己記得的「看過第幾階」——mapSeen 寫不進去時也靠它，同一頁不重播（Codex 審 7d8b243 ②）
 // mapKey：地圖上次畫出來的內容；沒變就不重畫，正在播的動畫不會被下一次 renderSide() 蓋掉
 var MAPX=window.G5Map, mapSeenMem=null, mapKey=null;
-var MAP_COLS=CIDS.length+1>8?Math.ceil((CIDS.length+1)/2):CIDS.length+1;   // 站＋終點超過 8 格就分兩列
+// 站＋終點超過 8 格就分列，每列最多 7 格（2026-10-14：18 站時原本的「分兩列」一列 10 格，iPad 站名互相疊住）
+var MAP_N=CIDS.length+1, MAP_COLS=MAP_N>8?Math.ceil(MAP_N/Math.ceil(MAP_N/7)):MAP_N;
 var MAP_CHECK='<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 var MAP_LOCK='<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>';
 var MAP_CUP='<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0z" fill="currentColor"/><path d="M7 6H4v1.5A3.5 3.5 0 0 0 7.5 11M17 6h3v1.5A3.5 3.5 0 0 1 16.5 11" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 14v3M8 20h8M9.5 17h5v3h-5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
@@ -424,7 +431,10 @@ function showMap(on){var b=$("#mapBox");if(!b)return;
 function mapStill(box){box.querySelectorAll("svg.pl.grow").forEach(function(e){e.classList.remove("grow");});box.querySelectorAll(".stars").forEach(function(e){e.remove();});}
 function renderMap(){
   var box=$("#mapBox"); if(!box||!MAPX) return;
-  var v=V(), t=MAPX.trail({cids:CIDS, stages:v.stages, on:conceptOn}), key=JSON.stringify(t);
+  var v=V(), t=MAPX.trail({cids:CIDS, stages:v.stages, on:conceptOn});
+  // 每站做過幾題：和 stageOf 同一個母體（開放中的觀念的全部卡片，含補題區加的），seen>0＝做過
+  var prog={}; C.allCards(S(),BANK).forEach(function(c){if(!conceptOn(c.concept))return;var p=prog[c.concept]||(prog[c.concept]={n:0,seen:0});p.n++;if(C.cardState(S(),c.id).seen>0)p.seen++;});
+  var key=JSON.stringify([t,prog]);
   // 內容沒變：不重畫；從別的畫面回來（地圖原本收著）時先拿掉動畫 class——display:none 再出現會讓 CSS 動畫重播
   if(key===mapKey&&box.firstChild){if(box.hidden)mapStill(box);showMap(true);return;}
   var seen=mapSeenMem!==null?mapSeenMem:MAPX.readSeen(seenStorage());
@@ -436,16 +446,18 @@ function renderMap(){
     var mark=s.done?MAP_CHECK:!s.on?MAP_LOCK:String(s.n);
     var state=s.done?'走過了':s.now?'現在在這裡':!s.on?'還沒開放':'還沒走到';
     var tag=s.now?'<span class="tag">現在在這裡</span>':!s.on?'<span class="tag">還沒開放</span>':'';
+    // pt：手機版（一站一行）的完整說法；ps：寬版（一列 7 站）的短寫，已放書的站靠打勾表示、不另寫
+    var p=prog[s.cid], pt=s.on&&p?(s.done?esc(MAPX.DONE):'做過 '+p.seen+'／'+p.n+' 題'):'', ps=s.on&&p&&!s.done?p.seen+'／'+p.n+' 題':'';
     return '<li'+(s.n%MAP_COLS===0?' class="eol"':'')+'><button type="button" class="stn'+cls+'" data-cid="'+s.cid+'"'+(s.now?' aria-current="step"':'')+(s.on?'':' aria-disabled="true"')+
-      ' aria-label="第 '+s.n+' 站 '+esc(c.short)+'（'+esc(UNITS[c.unit])+'）：'+state+'"><span class="dot">'+mark+'</span><span class="meta"><span class="nm">'+(c.short.length>5?esc(c.short.slice(0,3))+'<wbr>'+esc(c.short.slice(3)):esc(c.short))+'</span><span class="u">'+esc(UNITS[c.unit])+'</span>'+tag+'</span></button></li>';
+      ' aria-label="第 '+s.n+' 站 '+esc(c.short)+'（'+esc(UNITS[c.unit])+'）：'+state+(pt?'，'+pt:'')+'"><span class="dot">'+mark+'</span><span class="meta"><span class="nm">'+(c.short.length>5?esc(c.short.slice(0,Math.ceil(c.short.length/2)))+'<wbr>'+esc(c.short.slice(Math.ceil(c.short.length/2))):esc(c.short))+'</span><span class="u">'+esc(UNITS[c.unit])+'</span>'+(pt?'<span class="pg pgl">'+pt+'</span>':'')+(ps?'<span class="pg pgs">'+ps+'</span>':'')+tag+'</span></button></li>';
   }).join("")+
     '<li class="eol"><div class="stn goal'+(t.allDone?' won':'')+'"><span class="dot">'+(t.allDone?MAP_CUP:'考試')+'</span><span class="meta"><span class="nm">終點<wbr> '+md(EXAM)+'</span><span class="u">第一次定期評量</span></span></div></li>';
   var nm=MAPX.PLANT[t.level];
   var plant='<div class="plant" id="mapPlant">'+MAPX.plantSvg(t.level,{fresh:anim}).replace('class="pl"','class="pl'+(anim?' grow':'')+'"')+
     '<div class="stage">'+(t.level?'第 '+t.level+' 階：'+nm:MAPX.EMPTY)+'</div>'+
     (t.allDone?'<div class="mapwin" role="status">探險地圖全部走完了！去跟爸媽說</div>'+(fx.celebrate&&!reduce?MAP_STARS.replace('class="stars"','class="stars go"'):''):
-     t.level<MAPX.PLANT.length-1?'<div class="next"><span class="ghostbox">'+MAPX.plantSvg(t.level+1,{ghost:true})+'<b aria-hidden="true">？</b></span><span>再走過一站，看看它會變成什麼</span></div>':'')+'</div>';
-  box.innerHTML='<div class="maphead"><h2 id="mapT">探險地圖</h2><span id="mapCount">'+head+'</span></div><div class="mapbody"><ol class="trail'+(MAP_COLS<CIDS.length+1?' rows':'')+'" style="--n:'+MAP_COLS+'" aria-label="'+CIDS.length+' 個觀念的路線">'+lis+'</ol>'+plant+'</div>';
+     t.level<MAPX.PLANT.length-1?'<div class="next"><span class="ghostbox">'+MAPX.plantSvg(t.level+1,{ghost:true})+'<b aria-hidden="true">？</b></span><span>再做完一站的題目，看看它會變成什麼</span></div>':'')+'</div>';
+  box.innerHTML='<div class="maphead"><h2 id="mapT">探險地圖</h2><span id="mapCount">'+head+'</span></div><p class="small muted" id="mapRule" style="margin:4px 0 10px">'+esc(MAPX.RULE)+'</p><div class="mapbody"><ol class="trail'+(MAP_COLS<CIDS.length+1?' rows':'')+'" style="--n:'+MAP_COLS+'" aria-label="'+CIDS.length+' 個觀念的路線">'+lis+'</ol>'+plant+'</div>';
   mapAnim=anim?{at:Date.now(),prev:seen}:null;
   mapKey=key; mapSeenMem=t.level; MAPX.writeSeen(seenStorage(),t.level);
   box.querySelectorAll("button.stn").forEach(function(b){b.onclick=function(){

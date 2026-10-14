@@ -22,10 +22,18 @@ test("成長圖階數＝觀念數：一站一階、最後一站剛好長完", ()
   assert.equal(M.trail({ cids: CIDS, stages: st(CIDS.length), on }).allDone, true);
 });
 
-test("走過＝開花以上（BLOOM 3）：長葉了不算", () => {
-  assert.equal(M.BLOOM, 3);
-  const s = Object.fromEntries(CIDS.map((c) => [c, 2]));
-  assert.equal(M.trail({ cids: CIDS, stages: s, on }).walked, 0);
+// 2026-10-14 律師（孩子問「達成什麼條件才能放一本書」）：做完一站的題目就放一本書 ⇒ 走過＝長葉了（全部題目做過一次）以上
+test("走過＝長葉了以上（BLOOM 2）：題目全部做過就算，發芽了（只做一部分）不算", () => {
+  assert.equal(M.BLOOM, 2);
+  const leaf = Object.fromEntries(CIDS.map((c) => [c, 2]));
+  assert.equal(M.trail({ cids: CIDS, stages: leaf, on }).walked, CIDS.length);
+  const sprout = Object.fromEntries(CIDS.map((c) => [c, 1]));
+  assert.equal(M.trail({ cids: CIDS, stages: sprout, on }).walked, 0);
+});
+
+test("地圖寫得出放書（蓋房子、點亮）規則：本科有 RULE 與 DONE，規則講「每一題都做過一次」", () => {
+  assert.match(M.RULE || "", /每一題都做過一次/);
+  assert.ok(typeof M.DONE === "string" && M.DONE.length >= 2 && M.DONE.length <= 6, "DONE：" + M.DONE);
 });
 
 test("每一階的圖都比上一階多畫東西，最後一階有新部位可播動畫", () => {
