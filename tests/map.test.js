@@ -58,3 +58,9 @@ test("規則與自然站逐字相同（trail／readSeen／writeSeen／growth）"
   const cut = (s) => s.slice(s.indexOf("  // o.cids："), s.indexOf("  // ", s.indexOf("function growth")));
   assert.equal(cut(SRC), cut(sci));
 });
+
+test("每一階的觀看紀錄都讀得回來（含兩位數的第 10、11 階）；前導零、超過上限都當沒有", () => {
+  const m = {}; const s = { getItem: (k) => (k in m ? m[k] : null), setItem: (k, v) => { m[k] = String(v); } };
+  for (let n = 0; n < M.PLANT.length; n++) { M.writeSeen(s, n); assert.equal(M.readSeen(s), n, "第 " + n + " 階"); }
+  for (const bad of ["01", String(M.PLANT.length), "100", " 3"]) { m[M.SEEN_KEY] = bad; assert.equal(M.readSeen(s), null, bad); }
+});

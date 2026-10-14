@@ -88,7 +88,7 @@
   function readSeen(storage) {
     try {
       var v = storage.getItem(SEEN_KEY);
-      if (typeof v !== "string" || !/^[0-9]$/.test(v)) return null;   // 只認自己寫的單一數字；空字串、小數、負數都當沒有
+      if (typeof v !== "string" || !/^(0|[1-9][0-9]?)$/.test(v)) return null;   // 只認自己寫的整數（0–99，不帶前導零）；空字串、小數、負數都當沒有（2026-10-14 Codex：數學 11 階、國語 10 階，一位數判準讀不回第 10、11 階）
       var n = Number(v);
       return n <= MAX ? n : null;
     } catch (e) { return null; }
