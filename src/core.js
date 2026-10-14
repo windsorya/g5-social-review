@@ -225,7 +225,11 @@
           if (!isDay(mk) || mk >= today || (s.days[mk] && s.days[mk].touched.length)) return fail(state0, "MAKEUP_DAY");
           if (!dayCompleted(day)) return fail(state0, "MAKEUP_TODAY_FIRST");
           var mq = makeupCards(s, bank, day, today, mk);
-          if (!mq.length) return fail(state0, "MAKEUP_EMPTY");
+          if (!mq.length) {
+            // 全部卡都畢業了＝以後也排不出補做卡；其餘（今天都練過）明天就有（Grok 審 1b0aebe：原本一律說「明天再來補」）
+            var anyLeft = enabledCards(s, bank).some(function (c) { return !retired(cardState(s, c.id)); });
+            return fail(state0, anyLeft ? "MAKEUP_EMPTY" : "MAKEUP_ALLDONE");
+          }
           s.session = { day: today, kind: "review", queue: stuckLast(s, bank, sessionOrder(s, bank, today, mq)), answered: [], wrong: [], kinds: {}, makeup: mk };
         } else if (action.kind === "redo" || action.kind === "review") {
           // redo＝再練答錯的；review＝小考前把整個單元／觀念練一次。作答規則一樣，不改當日計畫與完成判定

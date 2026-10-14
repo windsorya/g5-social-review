@@ -1092,3 +1092,13 @@ test("T16 補做回合跨午夜被換成當天計畫：補做那天沒被寫，�
   assert.equal(s.session.makeup, undefined); assert.equal(s.days[MK], undefined);
   assert.deepEqual(C.checkState(s, B12), []);
 });
+
+test("T17（Grok 審 1b0aebe）每一張卡都畢業了 ⇒ MAKEUP_ALLDONE（不是「明天再來補」的 MAKEUP_EMPTY）", () => {
+  const b2 = bank(["z1", "z2"]); let s = doneToday(b2);
+  ["z1", "z2"].forEach((id) => { s.cards[id] = { seen: 3, goodDays: ["2026-10-15", "2026-10-17", "2026-10-19"], blockedDay: null, due: null }; });
+  assert.equal(C.reduce(s, op("sessionStart", { kind: "makeup", day: MK }), env(b2, NOON(D))).error, "MAKEUP_ALLDONE");
+  const b3 = bank(["z1", "z2", "z3"]); let t = doneToday(b3);
+  t.cards.z3 = { seen: 1, goodDays: [D], blockedDay: null, due: "2026-10-21" };   // z3 沒畢業、但今天已練 ⇒ 明天就有
+  ["z1", "z2"].forEach((id) => { t.cards[id] = { seen: 3, goodDays: ["2026-10-15", "2026-10-17", "2026-10-19"], blockedDay: null, due: null }; });
+  assert.equal(C.reduce(t, op("sessionStart", { kind: "makeup", day: MK }), env(b3, NOON(D))).error, "MAKEUP_EMPTY");
+});

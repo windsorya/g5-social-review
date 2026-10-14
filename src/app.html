@@ -375,7 +375,7 @@ function renderHome(){
   wireReview(el);
   on("#goAll",function(){beginRound({type:"sessionStart"});});
   on("#goLight",function(){beginRound({type:"sessionStart",size:3});});
-  on("#goOn",startRound);
+  on("#goOn",function(){var se2=V().session;if(se2&&se2.makeup)myMakeup=se2.makeup;startRound();});   // 按「繼續補做」＝本分頁接手這份補做
   on("#goTeach",function(){renderTeach();});
   on("#goRedo",function(){var w=V().session.wrong.slice();beginRound({type:"sessionStart",kind:"redo",ids:w});});
   renderSide();
@@ -446,7 +446,8 @@ function renderConcepts(){
 }
 // 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）：今天的卡做完後，日曆下方列出之前沒練的日子，按了補一份那天的新卡。
 // 補做過的日子在日曆上是淺綠色（核心在那天記 madeUp＝哪天補的）；連續天數照算。
-var MAKEUP_MSG={MAKEUP_TODAY_FIRST:"先把今天的卡做完，才能補做前面的日子。",MAKEUP_DAY:"這一天已經練過了，不用補。",MAKEUP_EMPTY:"現在沒有可以補做的卡：新卡都練過了，其他的卡不是今天練過、就是已經學會。明天再來補。",MAKEUP_NONE:"這一輪的題目沒辦法算到那一天（可能另一個分頁已經用掉，或跨過半夜了）。那一天還是可以再補一次。"};
+var myMakeup=null;   // 本分頁開始的補做日（只有它由本分頁結算；重新整理後由 session 接手，見 renderHome 的「繼續補做」）
+var MAKEUP_MSG={MAKEUP_TODAY_FIRST:"先把今天的卡做完，才能補做前面的日子。",MAKEUP_DAY:"這一天已經練過了，不用補。",MAKEUP_EMPTY:"現在沒有可以補做的卡：新卡都練過了，其他的卡不是今天練過、就是已經學會。明天再來補。",MAKEUP_ALLDONE:"每一張卡都已經學會了（練過、也在三個不同的日子答對），沒有卡可以拿來補做。",MAKEUP_NONE:"這一輪的題目沒辦法算到那一天（可能另一個分頁已經用掉，或跨過半夜了）。那一天還是可以再補一次。"};
 function madeUp(s,k){return !!(s.days[k]&&s.days[k].madeUp);}
 function renderCal(){
   var s=S(), v=V(), cells=[], k=START;
@@ -459,9 +460,10 @@ function renderCal(){
   $("#cal").innerHTML=cells.join("");
   var miss=C.missedDays(s,START,v.today), mkEl=$("#makeup");
   if(mkEl){
-    mkEl.innerHTML=!miss.length?'':!v.completed?'<span class="small muted">前面有 '+miss.length+' 天沒練。今天的卡做完後，可以在這裡補做。</span>':
+    var mkOn=v.session&&v.session.makeup&&v.session.queue.length&&!v.session.halted;   // 補做做到一半：只給「繼續補做」，不讓別的補做按鈕蓋掉進度
+    mkEl.innerHTML=!miss.length?'':mkOn?'<span class="small muted">'+md(v.session.makeup)+' 的補做還沒做完，按上面的「繼續補做」接著做。</span>':!v.completed?'<span class="small muted">前面有 '+miss.length+' 天沒練。今天的卡做完後，可以在這裡補做。</span>':
       '<span class="small muted">補做前面沒練的日子（每天補一份新卡）：</span><div class="row">'+miss.map(function(x){return '<button class="btn ghost sm" type="button" data-mk="'+x+'">補做 '+md(x)+'</button>';}).join("")+'</div>';
-    mkEl.querySelectorAll("button[data-mk]").forEach(function(b){b.onclick=function(){lastReview=null;var r=beginRound({type:"sessionStart",kind:"makeup",day:b.dataset.mk});if(!r.ok&&r.error)toast(MAKEUP_MSG[r.error]||"現在不能補做");};});
+    mkEl.querySelectorAll("button[data-mk]").forEach(function(b){b.onclick=function(){lastReview=null;myMakeup=b.dataset.mk;var r=beginRound({type:"sessionStart",kind:"makeup",day:b.dataset.mk});if(!r.ok&&r.error)toast(MAKEUP_MSG[r.error]||"現在不能補做");};});
   }
   var n=0; k=v.today;
   if(!(s.days[k]&&s.days[k].touched.length)) k=C.addDays(k,-1);
@@ -712,12 +714,15 @@ function renderEnd(){
   if(!se) return renderHome();
   // 補做回合做完：一次結算（核心只認今天真的練過、沒被用掉的卡）；已結算過的重畫不再送
   var mkMsg="";
-  if(se.makeup&&!se.queue.length&&!se.halted){
+  // 停下來（換題也錯、要爸媽陪看）也結算已經答過的卡；只有本分頁開始的補做才由本分頁結算（Grok 審 1b0aebe）
+  var mkDone=se.makeup&&se.answered.length&&(!se.queue.length||se.halted);
+  if(mkDone&&se.makeup===myMakeup){
     var dd=S().days[se.makeup];
     if(!(dd&&dd.madeUp)){var cr=act({type:"makeupClaim",day:se.makeup,ids:se.answered.slice()});if(!cr.ok&&cr.error&&MAKEUP_MSG[cr.error])mkMsg=MAKEUP_MSG[cr.error];}
     dd=S().days[se.makeup];
   }
-  var title=se.makeup&&!se.queue.length&&!se.halted&&dd&&dd.madeUp?md(se.makeup)+" 補做完成":(C.endTitle(v)||"這一輪完成了"), right=se.answered.length-se.wrong.length;
+  if(mkDone) dd=S().days[se.makeup];
+  var title=mkDone&&dd&&dd.madeUp?md(se.makeup)+(se.halted?" 補做先算到這裡":" 補做完成"):(C.endTitle(v)||"這一輪完成了"), right=se.answered.length-se.wrong.length;
   el.innerHTML='<div class="done"><b class="t">'+esc(title)+'</b>'+(mkMsg?'<p class="muted" style="margin:0">'+esc(mkMsg)+'</p>':'')+
     '<p style="margin:0">這一輪做了 '+se.answered.length+' 張'+(se.answered.length?'，第一次就答對 '+Math.max(0,right)+' 張':'')+'。</p>'+
     (v.completed?'':v.planIds.length?'<p class="muted" style="margin:0">今天的卡片完成 '+v.M.cardProgress.done+' / '+v.M.cardProgress.planned+' 張，還有 '+v.remainingIds.length+' 張，等一下想做再按開始。</p>':'')+

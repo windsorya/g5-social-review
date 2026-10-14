@@ -59,6 +59,11 @@ def flow(browser, label, device=None):
     today = json.loads(page.evaluate(f"localStorage.getItem('{KEY}')"))["days"]["2026-10-14"]
     bs.first.click()
     check(f"{label} 補做4 題目上方標「補做 10/13」", "補做 10/13" in page.inner_text("#main .qhead"), page.inner_text("#main")[:120])
+    answer_and_next(page)
+    page.reload(); page.wait_for_selector("#main .btn, #main .done")
+    check(f"{label} 補做4b 做到一半重新整理：沒有補做按鈕、說還沒做完、有「繼續補做 10/13」",
+          page.locator("#makeup button[data-mk]").count() == 0 and "還沒做完" in page.inner_text("#makeup") and "繼續補做 10/13" in page.inner_text("#main"), (page.inner_text("#makeup"), page.inner_text("#main")[:200]))
+    page.get_by_role("button", name="繼續補做 10/13").first.click()
     check(f"{label} 補做5 做完顯示「10/13 補做完成」", finish(page, "10/13 補做完成"), page.inner_text("#main")[:160])
     st = json.loads(page.evaluate(f"localStorage.getItem('{KEY}')"))
     d13 = st["days"]["2026-10-13"]
