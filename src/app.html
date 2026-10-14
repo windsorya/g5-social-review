@@ -6,7 +6,7 @@
 :root{
   --bg:#f4f8fb; --card:#ffffff; --ink:#17324a; --muted:#4a6276; --line:#c9d7e2; --line-soft:#dde7ef;
   --pri:#1f5f8b; --pri-soft:#e9f2f8; --on-pri:#ffffff;
-  --sun:#b4770c; --sun-deep:#8a5a0a; --sunball:#f2b632; --sun-soft:#f8ecd6;
+  --sun:#b4770c; --sun-deep:#8a5a0a; --sunball:#f2b632; --sun-soft:#f8ecd6; --on-sun:#3b2a05; --on-leaf:#ffffff;
   --leaf:#2f7d4f; --leaf-soft:#e2efe6; --soil:#8a5a3b;
   --bad:#b4442f; --bad-soft:#fbe7e2;
   --sky1:#cfe6f5; --sky2:#b7d9ef; --grass:#8fc79a; --waterfill:#bcdcef; --red:#d23c3c;
@@ -17,14 +17,14 @@
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#0f1a24; --card:#172634; --ink:#e4eef6; --muted:#9db3c4; --line:#2c4256; --line-soft:#223545;
   --pri:#6fb0de; --pri-soft:#1a3347; --on-pri:#0b1620;
-  --sun:#e6b25a; --sun-deep:#f0c879; --sunball:#f2c14e; --sun-soft:#3a2f1b;
+  --sun:#e6b25a; --sun-deep:#f0c879; --sunball:#f2c14e; --sun-soft:#3a2f1b; --on-sun:#2b1f04; --on-leaf:#0b1620;
   --leaf:#6cc08e; --leaf-soft:#1c3328; --soil:#b58660;
   --bad:#ec8a74; --bad-soft:#3a221d;
   --sky1:#1b3550; --sky2:#183047; --grass:#2f5a3a; --waterfill:#24506b; --red:#ff7a7a; --shadow:none; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0f1a24; --card:#172634; --ink:#e4eef6; --muted:#9db3c4; --line:#2c4256; --line-soft:#223545;
   --pri:#6fb0de; --pri-soft:#1a3347; --on-pri:#0b1620;
-  --sun:#e6b25a; --sun-deep:#f0c879; --sunball:#f2c14e; --sun-soft:#3a2f1b;
+  --sun:#e6b25a; --sun-deep:#f0c879; --sunball:#f2c14e; --sun-soft:#3a2f1b; --on-sun:#2b1f04; --on-leaf:#0b1620;
   --leaf:#6cc08e; --leaf-soft:#1c3328; --soil:#b58660;
   --bad:#ec8a74; --bad-soft:#3a221d;
   --sky1:#1b3550; --sky2:#183047; --grass:#2f5a3a; --waterfill:#24506b; --red:#ff7a7a; --shadow:none; color-scheme:dark}
@@ -180,6 +180,66 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
 .helplink{display:grid;gap:2px;background:var(--card);border:2px solid var(--pri);border-radius:16px;padding:14px 18px;color:var(--ink);text-decoration:none;box-shadow:var(--shadow);min-height:48px}
 .helplink b{font-family:var(--f-display);font-weight:400;font-size:21px;color:var(--pri)}
 .helplink span{font-size:15px;color:var(--muted)}
+/* 探險地圖（2026-10-14，與自然站 #1725 同一套 CSS）：觀念依序是站，開花＝走過；旁邊的成長圖走過幾站就長到第幾階 */
+.mapbox{background:var(--card);border:2px solid var(--line-soft);border-radius:var(--r);padding:16px;box-shadow:var(--shadow);display:grid;gap:12px;min-width:0}
+.maphead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px}
+.maphead h2{font-size:22px}
+.maphead span{color:var(--muted);font-size:16px;font-variant-numeric:tabular-nums}
+.mapbody{display:grid;grid-template-columns:minmax(0,1fr) 132px;gap:10px;align-items:start}
+.trail{list-style:none;margin:0;padding:18px 0 0;display:grid;grid-template-columns:repeat(var(--n,8),minmax(0,1fr));position:relative}
+.trail::before{content:"";position:absolute;left:6%;right:6%;top:45px;border-top:4px dashed var(--line);z-index:0}
+.trail li{position:relative;z-index:1;min-width:0}
+/* 站多（＞7 站＋終點）時分兩列：每列自己的虛線，列尾不接線（2026-10-14 數學 11 站、國語 10 站在 iPad 一列放不下，站名互相疊住） */
+.trail.rows{row-gap:16px}
+.trail.rows::before{display:none}
+.trail.rows li::after{content:"";position:absolute;left:50%;right:-50%;top:27px;border-top:4px dashed var(--line);z-index:-1}
+.trail.rows li.eol::after{display:none}
+.stn{display:grid;justify-items:center;align-content:start;gap:5px;text-align:center;width:100%;min-height:44px;padding:4px 0;border:0;background:none;border-radius:12px;color:var(--ink)}
+.stn .dot{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:18px;font-variant-numeric:tabular-nums;border:3px solid var(--line);background:var(--card);color:var(--muted);flex:none}
+.stn .meta{display:grid;gap:3px;justify-items:center;min-width:0}
+.stn .nm{font-size:15px;line-height:1.3;letter-spacing:0;word-break:keep-all}
+.stn .u{display:none;font-size:15px;color:var(--muted)}
+.stn .tag{font-size:15px;line-height:1.25;font-weight:700;color:var(--sun-deep);background:var(--sun-soft);border-radius:8px;padding:2px 6px;max-width:4.6em}
+.stn.done .dot{background:var(--leaf);border-color:var(--leaf);color:var(--on-leaf)}
+.stn.now .dot{background:var(--sunball);border-color:var(--sun-deep);color:var(--on-sun);box-shadow:0 0 0 6px var(--sun-soft)}
+.stn.off .dot{border-style:dashed;background:var(--line-soft)}
+.stn.off .nm{color:var(--muted)}
+.stn.off .tag{color:var(--muted);background:var(--line-soft);font-weight:400}
+.stn.goal .dot{border-radius:12px;background:var(--pri);border-color:var(--pri);color:var(--on-pri);font-size:15px}
+.stn.goal.won .dot{background:var(--sunball);border-color:var(--sun-deep);color:var(--on-sun);box-shadow:0 0 0 6px var(--sun-soft)}
+@media (hover:hover){button.stn:hover .nm{text-decoration:underline;text-underline-offset:3px}}
+.plant{position:relative;display:grid;justify-items:center;text-align:center;gap:6px;align-content:center}
+.plant svg.pl{width:112px;height:140px;transform-origin:50% 100%}
+.plant .stage{font-size:16px;font-weight:700}
+.plant .next{display:grid;grid-template-columns:44px 1fr;gap:8px;align-items:center;text-align:left;font-size:15px;color:var(--muted);line-height:1.4}
+.plant .ghostbox{position:relative;width:44px;height:55px}
+.plant svg.ghost{width:44px;height:55px}
+.plant .ghostbox b{position:absolute;inset:0;display:grid;place-items:center;font-size:24px;color:var(--ink)}
+.mapwin{font-family:var(--f-display);font-size:19px;line-height:1.4;background:var(--sun-soft);color:var(--ink);border-radius:12px;padding:8px 10px}
+.plant .stars{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.plant .stars path{fill:var(--sunball);stroke:var(--sun-deep);stroke-width:1;opacity:0}
+@keyframes mapGrow{0%{transform:scale(.8)}55%{transform:scale(1.08)}100%{transform:scale(1)}}
+@keyframes mapPart{0%{opacity:0;transform:scale(.2)}100%{opacity:1;transform:scale(1)}}
+@keyframes mapStar{0%{opacity:0;transform:scale(.3)}35%{opacity:1}100%{opacity:0;transform:scale(1.3) translateY(-12px)}}
+.plant svg.pl.grow{animation:mapGrow 1.1s ease-out both}
+.plant svg.pl.grow .newpart{transform-box:fill-box;transform-origin:50% 100%;animation:mapPart .8s ease-out .3s both}
+.plant .stars.go path{transform-box:fill-box;transform-origin:50% 50%;animation:mapStar 1.2s ease-out both}
+.plant .stars.go path:nth-child(2){animation-delay:.15s} .plant .stars.go path:nth-child(3){animation-delay:.3s} .plant .stars.go path:nth-child(4){animation-delay:.1s} .plant .stars.go path:nth-child(5){animation-delay:.25s}
+@media (max-width:700px){
+  .mapbody{grid-template-columns:1fr}
+  .plant{order:-1;grid-template-columns:96px 1fr;justify-items:start;text-align:left;column-gap:14px}
+  .plant svg.pl{width:96px;height:120px;grid-column:1;grid-row:1 / span 3}
+  .plant>:not(svg){grid-column:2}
+  .trail{grid-template-columns:1fr;gap:6px}
+  .trail{padding-top:0}
+  .trail.rows::before{display:block} .trail.rows li::after{display:none}
+  .trail::before{left:23px;right:auto;top:24px;bottom:24px;border-top:none;border-left:4px dashed var(--line)}
+  .stn{grid-template-columns:46px 1fr;justify-items:start;text-align:left;align-items:center;column-gap:14px}
+  .stn .meta{justify-items:start}
+  .stn .nm{max-width:none;font-size:17px}
+  .stn .u{display:block}
+  .stn .tag{max-width:none}
+}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
 </style>
 
@@ -191,6 +251,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     <svg class="sky" id="sky" aria-hidden="true" viewBox="0 0 820 60" style="height:60px"></svg>
   </header>
   <div id="banners" aria-live="polite"></div>
+  <section class="mapbox" id="mapBox" aria-labelledby="mapT" hidden></section>
   <main class="panel" id="main" aria-live="polite"></main>
   <a class="helplink" id="helpLink" href="https://windsorya.github.io/g5-help/"><b>難題解說</b><span>不懂的題目，一題一篇，只講那一題（各科都有）</span></a>
   <section id="conceptBox" style="display:grid;gap:12px">
@@ -234,6 +295,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
 <!--@INLINE src/socbank.js-->
 <!--@INLINE src/socexplain.js-->
 <!--@INLINE src/socvideos.js-->
+<!--@INLINE src/map.js-->
 <!--@INLINE src/core.js-->
 <script>
 (function(){
@@ -339,6 +401,52 @@ function banners(){
   on("#retrySave",retrySave);
 }
 
+/* ---------- 探險地圖＋成長圖（2026-10-14，邏輯與自然站 #1725 相同；成長圖依科目換，見 src/map.js） ---------- */
+// 走過一站＝觀念卡到「開花了」以上（view().stages ≥ 3，與觀念卡同一份 stageOf）；只讀，不寫 作答存檔。
+// 「上次看到第幾階」存在獨立 key 本站 mapSeen（每台裝置的觀看紀錄）；store.watches() 只看 作答存檔，不會觸發外部變更偵測。
+// mapSeenMem：這一頁自己記得的「看過第幾階」——mapSeen 寫不進去時也靠它，同一頁不重播（Codex 審 7d8b243 ②）
+// mapKey：地圖上次畫出來的內容；沒變就不重畫，正在播的動畫不會被下一次 renderSide() 蓋掉
+var MAPX=window.G5Map, mapSeenMem=null, mapKey=null;
+var MAP_COLS=CIDS.length+1>8?Math.ceil((CIDS.length+1)/2):CIDS.length+1;   // 站＋終點超過 8 格就分兩列
+var MAP_CHECK='<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+var MAP_LOCK='<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>';
+var MAP_CUP='<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0z" fill="currentColor"/><path d="M7 6H4v1.5A3.5 3.5 0 0 0 7.5 11M17 6h3v1.5A3.5 3.5 0 0 1 16.5 11" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 14v3M8 20h8M9.5 17h5v3h-5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+var MAP_STARS='<svg class="stars" viewBox="0 0 150 180" aria-hidden="true">'+[[30,40],[118,30],[18,110],[128,96],[75,8]].map(function(p){var x=p[0],y=p[1];return '<path d="M'+x+' '+(y-9)+'l2.6 6.2 6.4.4-4.9 4.1 1.6 6.3-5.7-3.5-5.7 3.5 1.6-6.3-4.9-4.1 6.4-.4z"/>';}).join("")+'</svg>';
+function seenStorage(){try{return window.localStorage;}catch(e){return null;}}
+function showMap(on){var b=$("#mapBox");if(b)b.hidden=!on;}
+function mapStill(box){box.querySelectorAll("svg.pl.grow").forEach(function(e){e.classList.remove("grow");});box.querySelectorAll(".stars").forEach(function(e){e.remove();});}
+function renderMap(){
+  var box=$("#mapBox"); if(!box||!MAPX) return;
+  var v=V(), t=MAPX.trail({cids:CIDS, stages:v.stages, on:conceptOn}), key=JSON.stringify(t);
+  // 內容沒變：不重畫；從別的畫面回來（地圖原本收著）時先拿掉動畫 class——display:none 再出現會讓 CSS 動畫重播
+  if(key===mapKey&&box.firstChild){if(box.hidden)mapStill(box);showMap(true);return;}
+  var seen=mapSeenMem!==null?mapSeenMem:MAPX.readSeen(seenStorage());
+  var reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var fx=MAPX.growth(seen,t.level,t.allDone), anim=fx.grow&&!reduce;
+  var head='走過 '+t.walked+' 站／共 '+t.total+' 站・'+(t.allDone?'全部走完了':t.left?'再 '+t.left+' 站到考試':'等老師教完'+CONCEPTS[CIDS[CIDS.length-1]].short+'再開放下一站');
+  var lis=t.stations.map(function(s){
+    var c=CONCEPTS[s.cid], cls=s.done?' done':s.now?' now':!s.on?' off':'';
+    var mark=s.done?MAP_CHECK:!s.on?MAP_LOCK:String(s.n);
+    var state=s.done?'走過了':s.now?'現在在這裡':!s.on?'還沒開放':'還沒走到';
+    var tag=s.now?'<span class="tag">現在在這裡</span>':!s.on?'<span class="tag">還沒開放</span>':'';
+    return '<li'+(s.n%MAP_COLS===0?' class="eol"':'')+'><button type="button" class="stn'+cls+'" data-cid="'+s.cid+'"'+(s.now?' aria-current="step"':'')+(s.on?'':' aria-disabled="true"')+
+      ' aria-label="第 '+s.n+' 站 '+esc(c.short)+'（'+esc(UNITS[c.unit])+'）：'+state+'"><span class="dot">'+mark+'</span><span class="meta"><span class="nm">'+(c.short.length>5?esc(c.short.slice(0,3))+'<wbr>'+esc(c.short.slice(3)):esc(c.short))+'</span><span class="u">'+esc(UNITS[c.unit])+'</span>'+tag+'</span></button></li>';
+  }).join("")+
+    '<li class="eol"><div class="stn goal'+(t.allDone?' won':'')+'"><span class="dot">'+(t.allDone?MAP_CUP:'考試')+'</span><span class="meta"><span class="nm">終點<wbr> '+md(EXAM)+'</span><span class="u">第一次定期評量</span></span></div></li>';
+  var nm=MAPX.PLANT[t.level];
+  var plant='<div class="plant" id="mapPlant">'+MAPX.plantSvg(t.level,{fresh:anim}).replace('class="pl"','class="pl'+(anim?' grow':'')+'"')+
+    '<div class="stage">'+(t.level?'第 '+t.level+' 階：'+nm:MAPX.EMPTY)+'</div>'+
+    (t.allDone?'<div class="mapwin" role="status">探險地圖全部走完了！去跟爸媽說</div>'+(fx.celebrate&&!reduce?MAP_STARS.replace('class="stars"','class="stars go"'):''):
+     t.level<MAPX.PLANT.length-1?'<div class="next"><span class="ghostbox">'+MAPX.plantSvg(t.level+1,{ghost:true})+'<b aria-hidden="true">？</b></span><span>再走過一站，看看它會變成什麼</span></div>':'')+'</div>';
+  box.innerHTML='<div class="maphead"><h2 id="mapT">探險地圖</h2><span id="mapCount">'+head+'</span></div><div class="mapbody"><ol class="trail'+(MAP_COLS<CIDS.length+1?' rows':'')+'" style="--n:'+MAP_COLS+'" aria-label="'+CIDS.length+' 個觀念的路線">'+lis+'</ol>'+plant+'</div>';
+  mapKey=key; mapSeenMem=t.level; MAPX.writeSeen(seenStorage(),t.level);
+  box.querySelectorAll("button.stn").forEach(function(b){b.onclick=function(){
+    var cid=b.dataset.cid;
+    if(!conceptOn(cid)){toast("這一站還沒開放。");return;}
+    renderConcept(cid);
+  };});
+  showMap(true);
+}
 /* ---------- 首頁 ---------- */
 var screen="home", booted=false;   // booted：開頁那一次 openFromHash 之後才為 true（回首頁才清 #c/ 網址）
 function route(){
@@ -775,10 +883,10 @@ function renderTeach(){
 /* ---------- 實驗室：先預測才能操作；完成才算數 ---------- */
 var labTimer=null;
 function stopAnim(){if(labTimer){cancelAnimationFrame(labTimer);labTimer=null;}}
-function leaveLab(){stopAnim();lab=null;}
+function leaveLab(){stopAnim();lab=null;showMap(false);}   // 地圖只在首頁出現：其他畫面都先經過這裡（renderHome 之後會再打開）
 var lab=null;
 function openLab(cid,ctx){
-  stopAnim(); screen="lab";
+  stopAnim(); showMap(false); screen="lab";
   var con=CONCEPTS[cid], key=con.lab, pr=PREDICT[cid], tasks=EXPLAIN[cid][0].lines.map(function(t,i){return "看懂第 "+(i+1)+" 句："+t;}), runId=newId("r");
   var r=act({type:"labStart",runId:runId,lab:key,tasks:tasks.length,answer:pr.a,from:ctx.from,card:ctx.card||undefined});
   if(!r.ok) return;
@@ -891,7 +999,7 @@ function renderSummary(){
     try{navigator.clipboard.writeText(t).then(done,fail);}catch(e){fail();}
   });
 }
-function renderSide(){header();banners();renderConcepts();renderCal();renderExit();renderSummary();renderSettings();}
+function renderSide(){header();banners();renderConcepts();renderCal();renderExit();renderSummary();renderSettings();if(screen==="home")renderMap();}
 
 /* ---------- 設定 ---------- */
 function renderSettings(){

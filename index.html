@@ -6,7 +6,7 @@
 :root{
   --bg:#f4f8fb; --card:#ffffff; --ink:#17324a; --muted:#4a6276; --line:#c9d7e2; --line-soft:#dde7ef;
   --pri:#1f5f8b; --pri-soft:#e9f2f8; --on-pri:#ffffff;
-  --sun:#b4770c; --sun-deep:#8a5a0a; --sunball:#f2b632; --sun-soft:#f8ecd6;
+  --sun:#b4770c; --sun-deep:#8a5a0a; --sunball:#f2b632; --sun-soft:#f8ecd6; --on-sun:#3b2a05; --on-leaf:#ffffff;
   --leaf:#2f7d4f; --leaf-soft:#e2efe6; --soil:#8a5a3b;
   --bad:#b4442f; --bad-soft:#fbe7e2;
   --sky1:#cfe6f5; --sky2:#b7d9ef; --grass:#8fc79a; --waterfill:#bcdcef; --red:#d23c3c;
@@ -17,14 +17,14 @@
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#0f1a24; --card:#172634; --ink:#e4eef6; --muted:#9db3c4; --line:#2c4256; --line-soft:#223545;
   --pri:#6fb0de; --pri-soft:#1a3347; --on-pri:#0b1620;
-  --sun:#e6b25a; --sun-deep:#f0c879; --sunball:#f2c14e; --sun-soft:#3a2f1b;
+  --sun:#e6b25a; --sun-deep:#f0c879; --sunball:#f2c14e; --sun-soft:#3a2f1b; --on-sun:#2b1f04; --on-leaf:#0b1620;
   --leaf:#6cc08e; --leaf-soft:#1c3328; --soil:#b58660;
   --bad:#ec8a74; --bad-soft:#3a221d;
   --sky1:#1b3550; --sky2:#183047; --grass:#2f5a3a; --waterfill:#24506b; --red:#ff7a7a; --shadow:none; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0f1a24; --card:#172634; --ink:#e4eef6; --muted:#9db3c4; --line:#2c4256; --line-soft:#223545;
   --pri:#6fb0de; --pri-soft:#1a3347; --on-pri:#0b1620;
-  --sun:#e6b25a; --sun-deep:#f0c879; --sunball:#f2c14e; --sun-soft:#3a2f1b;
+  --sun:#e6b25a; --sun-deep:#f0c879; --sunball:#f2c14e; --sun-soft:#3a2f1b; --on-sun:#2b1f04; --on-leaf:#0b1620;
   --leaf:#6cc08e; --leaf-soft:#1c3328; --soil:#b58660;
   --bad:#ec8a74; --bad-soft:#3a221d;
   --sky1:#1b3550; --sky2:#183047; --grass:#2f5a3a; --waterfill:#24506b; --red:#ff7a7a; --shadow:none; color-scheme:dark}
@@ -180,6 +180,66 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
 .helplink{display:grid;gap:2px;background:var(--card);border:2px solid var(--pri);border-radius:16px;padding:14px 18px;color:var(--ink);text-decoration:none;box-shadow:var(--shadow);min-height:48px}
 .helplink b{font-family:var(--f-display);font-weight:400;font-size:21px;color:var(--pri)}
 .helplink span{font-size:15px;color:var(--muted)}
+/* 探險地圖（2026-10-14，與自然站 #1725 同一套 CSS）：觀念依序是站，開花＝走過；旁邊的成長圖走過幾站就長到第幾階 */
+.mapbox{background:var(--card);border:2px solid var(--line-soft);border-radius:var(--r);padding:16px;box-shadow:var(--shadow);display:grid;gap:12px;min-width:0}
+.maphead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 12px}
+.maphead h2{font-size:22px}
+.maphead span{color:var(--muted);font-size:16px;font-variant-numeric:tabular-nums}
+.mapbody{display:grid;grid-template-columns:minmax(0,1fr) 132px;gap:10px;align-items:start}
+.trail{list-style:none;margin:0;padding:18px 0 0;display:grid;grid-template-columns:repeat(var(--n,8),minmax(0,1fr));position:relative}
+.trail::before{content:"";position:absolute;left:6%;right:6%;top:45px;border-top:4px dashed var(--line);z-index:0}
+.trail li{position:relative;z-index:1;min-width:0}
+/* 站多（＞7 站＋終點）時分兩列：每列自己的虛線，列尾不接線（2026-10-14 數學 11 站、國語 10 站在 iPad 一列放不下，站名互相疊住） */
+.trail.rows{row-gap:16px}
+.trail.rows::before{display:none}
+.trail.rows li::after{content:"";position:absolute;left:50%;right:-50%;top:27px;border-top:4px dashed var(--line);z-index:-1}
+.trail.rows li.eol::after{display:none}
+.stn{display:grid;justify-items:center;align-content:start;gap:5px;text-align:center;width:100%;min-height:44px;padding:4px 0;border:0;background:none;border-radius:12px;color:var(--ink)}
+.stn .dot{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;font-weight:700;font-size:18px;font-variant-numeric:tabular-nums;border:3px solid var(--line);background:var(--card);color:var(--muted);flex:none}
+.stn .meta{display:grid;gap:3px;justify-items:center;min-width:0}
+.stn .nm{font-size:15px;line-height:1.3;letter-spacing:0;word-break:keep-all}
+.stn .u{display:none;font-size:15px;color:var(--muted)}
+.stn .tag{font-size:15px;line-height:1.25;font-weight:700;color:var(--sun-deep);background:var(--sun-soft);border-radius:8px;padding:2px 6px;max-width:4.6em}
+.stn.done .dot{background:var(--leaf);border-color:var(--leaf);color:var(--on-leaf)}
+.stn.now .dot{background:var(--sunball);border-color:var(--sun-deep);color:var(--on-sun);box-shadow:0 0 0 6px var(--sun-soft)}
+.stn.off .dot{border-style:dashed;background:var(--line-soft)}
+.stn.off .nm{color:var(--muted)}
+.stn.off .tag{color:var(--muted);background:var(--line-soft);font-weight:400}
+.stn.goal .dot{border-radius:12px;background:var(--pri);border-color:var(--pri);color:var(--on-pri);font-size:15px}
+.stn.goal.won .dot{background:var(--sunball);border-color:var(--sun-deep);color:var(--on-sun);box-shadow:0 0 0 6px var(--sun-soft)}
+@media (hover:hover){button.stn:hover .nm{text-decoration:underline;text-underline-offset:3px}}
+.plant{position:relative;display:grid;justify-items:center;text-align:center;gap:6px;align-content:center}
+.plant svg.pl{width:112px;height:140px;transform-origin:50% 100%}
+.plant .stage{font-size:16px;font-weight:700}
+.plant .next{display:grid;grid-template-columns:44px 1fr;gap:8px;align-items:center;text-align:left;font-size:15px;color:var(--muted);line-height:1.4}
+.plant .ghostbox{position:relative;width:44px;height:55px}
+.plant svg.ghost{width:44px;height:55px}
+.plant .ghostbox b{position:absolute;inset:0;display:grid;place-items:center;font-size:24px;color:var(--ink)}
+.mapwin{font-family:var(--f-display);font-size:19px;line-height:1.4;background:var(--sun-soft);color:var(--ink);border-radius:12px;padding:8px 10px}
+.plant .stars{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.plant .stars path{fill:var(--sunball);stroke:var(--sun-deep);stroke-width:1;opacity:0}
+@keyframes mapGrow{0%{transform:scale(.8)}55%{transform:scale(1.08)}100%{transform:scale(1)}}
+@keyframes mapPart{0%{opacity:0;transform:scale(.2)}100%{opacity:1;transform:scale(1)}}
+@keyframes mapStar{0%{opacity:0;transform:scale(.3)}35%{opacity:1}100%{opacity:0;transform:scale(1.3) translateY(-12px)}}
+.plant svg.pl.grow{animation:mapGrow 1.1s ease-out both}
+.plant svg.pl.grow .newpart{transform-box:fill-box;transform-origin:50% 100%;animation:mapPart .8s ease-out .3s both}
+.plant .stars.go path{transform-box:fill-box;transform-origin:50% 50%;animation:mapStar 1.2s ease-out both}
+.plant .stars.go path:nth-child(2){animation-delay:.15s} .plant .stars.go path:nth-child(3){animation-delay:.3s} .plant .stars.go path:nth-child(4){animation-delay:.1s} .plant .stars.go path:nth-child(5){animation-delay:.25s}
+@media (max-width:700px){
+  .mapbody{grid-template-columns:1fr}
+  .plant{order:-1;grid-template-columns:96px 1fr;justify-items:start;text-align:left;column-gap:14px}
+  .plant svg.pl{width:96px;height:120px;grid-column:1;grid-row:1 / span 3}
+  .plant>:not(svg){grid-column:2}
+  .trail{grid-template-columns:1fr;gap:6px}
+  .trail{padding-top:0}
+  .trail.rows::before{display:block} .trail.rows li::after{display:none}
+  .trail::before{left:23px;right:auto;top:24px;bottom:24px;border-top:none;border-left:4px dashed var(--line)}
+  .stn{grid-template-columns:46px 1fr;justify-items:start;text-align:left;align-items:center;column-gap:14px}
+  .stn .meta{justify-items:start}
+  .stn .nm{max-width:none;font-size:17px}
+  .stn .u{display:block}
+  .stn .tag{max-width:none}
+}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
 </style>
 
@@ -191,6 +251,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     <svg class="sky" id="sky" aria-hidden="true" viewBox="0 0 820 60" style="height:60px"></svg>
   </header>
   <div id="banners" aria-live="polite"></div>
+  <section class="mapbox" id="mapBox" aria-labelledby="mapT" hidden></section>
   <main class="panel" id="main" aria-live="polite"></main>
   <a class="helplink" id="helpLink" href="https://windsorya.github.io/g5-help/"><b>難題解說</b><span>不懂的題目，一題一篇，只講那一題（各科都有）</span></a>
   <section id="conceptBox" style="display:grid;gap:12px">
@@ -1015,6 +1076,131 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     ]
   };
   if (typeof module !== "undefined" && module.exports) module.exports = V; else root.G5_VIDEOS = V;
+})(typeof window !== "undefined" ? window : this);
+
+</script>
+<script>
+/* 探險地圖＋成長圖（2026-10-14 律師：「數學、國語、社會是否也建議比照這種養成機制」→ 建議並實作）
+ * 規則與自然站 g5-sci-review/src/map.js 同一份（trail／readSeen／writeSeen／growth 逐字相同，tests/map.test.js 會比對）：
+ *   走過一站＝觀念卡到「開花了」以上；一站長一階；階數＝走過站數。差別只在長出來的東西（本站：ART.title）。
+ * 純函式：只讀畫面算好的觀念階段（core.js view().stages），不讀不寫作答存檔；「上次看到第幾階」存在獨立 key g5soc.mapSeen。
+ */
+(function (root) {
+  "use strict";
+  var SEEN_KEY = "g5soc.mapSeen";
+  var BLOOM = 3;
+// 三科成長圖（數學蓋房子／國語書架／社會臺灣地圖）。每科：NAMES[0]＝空的、NAMES[n]＝走過 n 站；art(level, part, col)
+  var ARTS = {
+  math: {
+    title: "房子", empty: "一塊空地，走過第一站就打地基",
+    NAMES: ["一塊空地", "打好地基", "左邊的牆", "右邊的牆", "裝上門", "左邊窗戶", "右邊窗戶", "加上煙囪", "蓋好屋頂", "圍上籬笆", "種一棵樹", "插上旗子"],
+    art: function (level, part, col) {
+      var s = '<rect x="0" y="130" width="120" height="20" rx="4" fill="' + col("var(--grass)") + '"/>';
+      s += '<path d="M28 130 V122 M92 130 V122 M28 124 H92" stroke="' + col("var(--soil)") + '" stroke-width="2" stroke-dasharray="4 4" fill="none"/>';
+      s += part(1, '<rect x="26" y="124" width="68" height="8" rx="2" fill="' + col("var(--muted)") + '"/>');
+      s += part(2, '<rect x="32" y="84" width="28" height="40" fill="' + col("var(--sun-soft)") + '" stroke="' + col("var(--soil)") + '" stroke-width="2"/>');
+      s += part(3, '<rect x="60" y="84" width="28" height="40" fill="' + col("var(--sun-soft)") + '" stroke="' + col("var(--soil)") + '" stroke-width="2"/>');
+      s += part(4, '<rect x="53" y="102" width="14" height="22" rx="2" fill="' + col("var(--soil)") + '"/><circle cx="64" cy="114" r="1.6" fill="' + col("var(--sunball)") + '"/>');
+      s += part(5, '<rect x="37" y="92" width="14" height="12" fill="' + col("var(--waterfill)") + '" stroke="' + col("var(--ink)") + '" stroke-width="1.5"/><path d="M44 92 V104 M37 98 H51" stroke="' + col("var(--ink)") + '" stroke-width="1"/>');
+      s += part(6, '<rect x="69" y="92" width="14" height="12" fill="' + col("var(--waterfill)") + '" stroke="' + col("var(--ink)") + '" stroke-width="1.5"/><path d="M76 92 V104 M69 98 H83" stroke="' + col("var(--ink)") + '" stroke-width="1"/>');
+      s += part(7, '<rect x="74" y="56" width="9" height="22" fill="' + col("var(--soil)") + '"/>');
+      s += part(8, '<path d="M24 86 L60 56 L96 86 Z" fill="' + col("var(--red)") + '"/>');
+      s += part(9, '<path d="M4 132 V114 M10 132 V114 M16 132 V114 M22 132 V114 M98 132 V114 M104 132 V114 M110 132 V114 M116 132 V114 M2 119 H24 M2 127 H24 M96 119 H118 M96 127 H118" stroke="' + col("var(--soil)") + '" stroke-width="2.4" stroke-linecap="round"/>');
+      s += part(10, '<rect x="11" y="86" width="5" height="28" fill="' + col("var(--soil)") + '"/><circle cx="13.5" cy="80" r="12" fill="' + col("var(--leaf)") + '"/>');
+      s += part(11, '<path d="M60 56 V30" stroke="' + col("var(--ink)") + '" stroke-width="2"/><path d="M60 30 L78 36 L60 42 Z" fill="' + col("var(--sunball)") + '"/>');
+      return s;
+    }
+  },
+  chi: {
+    title: "書架", empty: "一個空書架，走過第一站就放上第一本書",
+    NAMES: ["空書架", "第 1 本書", "第 2 本書", "第 3 本書", "第 4 本書", "第 5 本書", "第 6 本書", "第 7 本書", "第 8 本書", "第 9 本書", "書架放滿了"],
+    art: function (level, part, col) {
+      var s = '<rect x="12" y="16" width="96" height="128" rx="4" fill="none" stroke="' + col("var(--soil)") + '" stroke-width="5"/>' +
+              '<path d="M12 80 H108" stroke="' + col("var(--soil)") + '" stroke-width="5"/>';
+      var X = [18, 36, 54, 72, 90], H = [52, 44, 54, 46, 50], C = ["var(--red)", "var(--pri)", "var(--leaf)", "var(--sunball)", "var(--sun)"];
+      for (var i = 0; i < 10; i++) {
+        var r = i < 5 ? 0 : 1, k = i % 5, base = r ? 141 : 77, h = H[(k + r * 2) % 5], c = C[(k + r * 3) % 5];
+        s += part(i + 1, '<rect x="' + X[k] + '" y="' + (base - h) + '" width="14" height="' + h + '" rx="2" fill="' + col(c) + '"/>' +
+                          '<path d="M' + (X[k] + 3) + ' ' + (base - h + 8) + ' H' + (X[k] + 11) + '" stroke="' + col("var(--card)") + '" stroke-width="2"/>');
+      }
+      return s;
+    }
+  },
+  soc: {
+    title: "臺灣地圖", empty: "一張還沒點亮的臺灣地圖，走過第一站就點亮最北邊",
+    NAMES: ["還沒點亮的臺灣地圖", "點亮第 1 塊", "點亮第 2 塊", "點亮第 3 塊", "點亮第 4 塊", "點亮第 5 塊", "點亮第 6 塊", "點亮第 7 塊", "整個臺灣都亮了"],
+    art: function (level, part, col) {
+      // 主島海岸線（經緯度概略點，由北往東、南、西繞一圈）；投影 x=(lon-119.95)*41+10、y=(25.35-lat)*41*1.1+3
+      var P = [[121.54,25.30],[121.69,25.21],[121.75,25.15],[121.92,25.13],[122.00,25.01],[121.83,24.86],[121.86,24.60],[121.80,24.45],[121.66,24.20],[121.62,23.98],[121.52,23.60],[121.38,23.10],[121.20,22.88],[121.15,22.75],[121.00,22.60],[120.90,22.34],[120.88,22.20],[120.86,21.90],[120.73,21.93],[120.70,22.00],[120.71,22.08],[120.65,22.26],[120.59,22.37],[120.45,22.46],[120.38,22.50],[120.27,22.62],[120.18,22.88],[120.15,23.00],[120.08,23.15],[120.11,23.27],[120.15,23.38],[120.15,23.46],[120.17,23.58],[120.25,23.80],[120.30,23.96],[120.40,24.07],[120.50,24.27],[120.58,24.38],[120.62,24.43],[120.67,24.50],[120.77,24.62],[120.85,24.70],[120.92,24.83],[121.00,24.93],[121.10,25.05],[121.30,25.12],[121.40,25.18],[121.52,25.29]];
+      var d = P.map(function (p, i) { return (i ? "L" : "M") + ((p[0] - 119.95) * 41 + 10).toFixed(1) + " " + ((25.35 - p[1]) * 41 * 1.1 + 3).toFixed(1); }).join(" ") + " Z";
+      var top = (25.35 - 25.30) * 41 * 1.1 + 3, bot = (25.35 - 21.90) * 41 * 1.1 + 3, bh = (bot - top) / 8;
+      var id = "tw" + Math.random().toString(36).slice(2, 8);
+      var s = '<defs><clipPath id="' + id + '"><path d="' + d + '"/></clipPath></defs>' +
+              '<path d="' + d + '" fill="' + col("var(--leaf-soft)") + '"/>';
+      for (var i = 0; i < 8; i++)
+        s += part(i + 1, '<rect x="0" y="' + (top + i * bh - 0.5).toFixed(1) + '" width="120" height="' + (bh + 1).toFixed(1) + '" fill="' + col("var(--leaf)") + '" clip-path="url(#' + id + ')"/>');
+      s += '<path d="' + d + '" fill="none" stroke="' + col("var(--leaf)") + '" stroke-width="2" stroke-linejoin="round"/>';
+      return s;
+    }
+  }
+};
+
+  var ART = ARTS.soc;
+  var PLANT = ART.NAMES;
+  var MAX = PLANT.length - 1;
+
+  // o.cids：觀念依程式順序；o.stages：{cid: 0–4}；o.on(cid)：這個觀念開放了沒（未開放＝鎖頭、不算分母）
+  function trail(o) {
+    var stations = o.cids.map(function (cid, i) {
+      var on = !!o.on(cid), st = (o.stages && o.stages[cid]) || 0;
+      return { cid: cid, n: i + 1, on: on, done: on && st >= BLOOM, now: false };
+    });
+    var first = stations.filter(function (s) { return s.on && !s.done; })[0];
+    if (first) first.now = true;
+    var total = stations.filter(function (s) { return s.on; }).length;
+    var walked = stations.filter(function (s) { return s.done; }).length;
+    var locked = stations.length - total;
+    return {
+      stations: stations, walked: walked, total: total, left: total - walked, locked: locked,
+      level: Math.min(walked, MAX),
+      allDone: stations.length > 0 && locked === 0 && walked === stations.length
+    };
+  }
+
+  function readSeen(storage) {
+    try {
+      var v = storage.getItem(SEEN_KEY);
+      if (typeof v !== "string" || !/^[0-9]$/.test(v)) return null;   // 只認自己寫的單一數字；空字串、小數、負數都當沒有
+      var n = Number(v);
+      return n <= MAX ? n : null;
+    } catch (e) { return null; }
+  }
+  function writeSeen(storage, n) {
+    try { storage.setItem(SEEN_KEY, String(n)); return true; } catch (e) { return false; }
+  }
+  // 本次比上次看到的大才長大；沒看過當 0（第一次打開也看得到它長出來）；變小（重新開始）不動畫
+  function growth(seen, level, allDone) {
+    var prev = seen === null || seen === undefined ? 0 : seen;
+    var grow = level > prev;
+    return { grow: grow, celebrate: !!allDone && grow };
+  }
+
+  // 成長圖 SVG（不用 emoji）。ghost＝下一階的灰色剪影；fresh＝這一階新長出來的部位加 class="newpart"（給長大動畫）
+  function plantSvg(level, opts) {
+    opts = opts || {};
+    var ghost = !!opts.ghost, fresh = !!opts.fresh;
+    level = Math.max(0, Math.min(MAX, level));
+    function col(c) { return ghost ? "var(--muted)" : c; }
+    function part(from, svg) {
+      if (level < from) return "";
+      return fresh && level === from && !ghost ? '<g class="newpart">' + svg + "</g>" : svg;
+    }
+    return '<svg class="' + (ghost ? "ghost" : "pl") + '" viewBox="0 0 120 150" role="img" aria-label="' + (ghost ? "下一階還看不出來" : ART.title + "：" + PLANT[level]) + '"' +
+      (ghost ? ' opacity=".4"' : "") + ">" + ART.art(level, part, col) + "</svg>";
+  }
+
+  var api = { SEEN_KEY: SEEN_KEY, BLOOM: BLOOM, PLANT: PLANT, TITLE: ART.title, EMPTY: ART.empty, trail: trail, readSeen: readSeen, writeSeen: writeSeen, growth: growth, plantSvg: plantSvg };
+  if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5Map = api;
 })(typeof window !== "undefined" ? window : this);
 
 </script>
@@ -1899,6 +2085,52 @@ function banners(){
   on("#retrySave",retrySave);
 }
 
+/* ---------- 探險地圖＋成長圖（2026-10-14，邏輯與自然站 #1725 相同；成長圖依科目換，見 src/map.js） ---------- */
+// 走過一站＝觀念卡到「開花了」以上（view().stages ≥ 3，與觀念卡同一份 stageOf）；只讀，不寫 作答存檔。
+// 「上次看到第幾階」存在獨立 key 本站 mapSeen（每台裝置的觀看紀錄）；store.watches() 只看 作答存檔，不會觸發外部變更偵測。
+// mapSeenMem：這一頁自己記得的「看過第幾階」——mapSeen 寫不進去時也靠它，同一頁不重播（Codex 審 7d8b243 ②）
+// mapKey：地圖上次畫出來的內容；沒變就不重畫，正在播的動畫不會被下一次 renderSide() 蓋掉
+var MAPX=window.G5Map, mapSeenMem=null, mapKey=null;
+var MAP_COLS=CIDS.length+1>8?Math.ceil((CIDS.length+1)/2):CIDS.length+1;   // 站＋終點超過 8 格就分兩列
+var MAP_CHECK='<svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+var MAP_LOCK='<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M8 11V8a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>';
+var MAP_CUP='<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0z" fill="currentColor"/><path d="M7 6H4v1.5A3.5 3.5 0 0 0 7.5 11M17 6h3v1.5A3.5 3.5 0 0 1 16.5 11" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 14v3M8 20h8M9.5 17h5v3h-5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+var MAP_STARS='<svg class="stars" viewBox="0 0 150 180" aria-hidden="true">'+[[30,40],[118,30],[18,110],[128,96],[75,8]].map(function(p){var x=p[0],y=p[1];return '<path d="M'+x+' '+(y-9)+'l2.6 6.2 6.4.4-4.9 4.1 1.6 6.3-5.7-3.5-5.7 3.5 1.6-6.3-4.9-4.1 6.4-.4z"/>';}).join("")+'</svg>';
+function seenStorage(){try{return window.localStorage;}catch(e){return null;}}
+function showMap(on){var b=$("#mapBox");if(b)b.hidden=!on;}
+function mapStill(box){box.querySelectorAll("svg.pl.grow").forEach(function(e){e.classList.remove("grow");});box.querySelectorAll(".stars").forEach(function(e){e.remove();});}
+function renderMap(){
+  var box=$("#mapBox"); if(!box||!MAPX) return;
+  var v=V(), t=MAPX.trail({cids:CIDS, stages:v.stages, on:conceptOn}), key=JSON.stringify(t);
+  // 內容沒變：不重畫；從別的畫面回來（地圖原本收著）時先拿掉動畫 class——display:none 再出現會讓 CSS 動畫重播
+  if(key===mapKey&&box.firstChild){if(box.hidden)mapStill(box);showMap(true);return;}
+  var seen=mapSeenMem!==null?mapSeenMem:MAPX.readSeen(seenStorage());
+  var reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var fx=MAPX.growth(seen,t.level,t.allDone), anim=fx.grow&&!reduce;
+  var head='走過 '+t.walked+' 站／共 '+t.total+' 站・'+(t.allDone?'全部走完了':t.left?'再 '+t.left+' 站到考試':'等老師教完'+CONCEPTS[CIDS[CIDS.length-1]].short+'再開放下一站');
+  var lis=t.stations.map(function(s){
+    var c=CONCEPTS[s.cid], cls=s.done?' done':s.now?' now':!s.on?' off':'';
+    var mark=s.done?MAP_CHECK:!s.on?MAP_LOCK:String(s.n);
+    var state=s.done?'走過了':s.now?'現在在這裡':!s.on?'還沒開放':'還沒走到';
+    var tag=s.now?'<span class="tag">現在在這裡</span>':!s.on?'<span class="tag">還沒開放</span>':'';
+    return '<li'+(s.n%MAP_COLS===0?' class="eol"':'')+'><button type="button" class="stn'+cls+'" data-cid="'+s.cid+'"'+(s.now?' aria-current="step"':'')+(s.on?'':' aria-disabled="true"')+
+      ' aria-label="第 '+s.n+' 站 '+esc(c.short)+'（'+esc(UNITS[c.unit])+'）：'+state+'"><span class="dot">'+mark+'</span><span class="meta"><span class="nm">'+(c.short.length>5?esc(c.short.slice(0,3))+'<wbr>'+esc(c.short.slice(3)):esc(c.short))+'</span><span class="u">'+esc(UNITS[c.unit])+'</span>'+tag+'</span></button></li>';
+  }).join("")+
+    '<li class="eol"><div class="stn goal'+(t.allDone?' won':'')+'"><span class="dot">'+(t.allDone?MAP_CUP:'考試')+'</span><span class="meta"><span class="nm">終點<wbr> '+md(EXAM)+'</span><span class="u">第一次定期評量</span></span></div></li>';
+  var nm=MAPX.PLANT[t.level];
+  var plant='<div class="plant" id="mapPlant">'+MAPX.plantSvg(t.level,{fresh:anim}).replace('class="pl"','class="pl'+(anim?' grow':'')+'"')+
+    '<div class="stage">'+(t.level?'第 '+t.level+' 階：'+nm:MAPX.EMPTY)+'</div>'+
+    (t.allDone?'<div class="mapwin" role="status">探險地圖全部走完了！去跟爸媽說</div>'+(fx.celebrate&&!reduce?MAP_STARS.replace('class="stars"','class="stars go"'):''):
+     t.level<MAPX.PLANT.length-1?'<div class="next"><span class="ghostbox">'+MAPX.plantSvg(t.level+1,{ghost:true})+'<b aria-hidden="true">？</b></span><span>再走過一站，看看它會變成什麼</span></div>':'')+'</div>';
+  box.innerHTML='<div class="maphead"><h2 id="mapT">探險地圖</h2><span id="mapCount">'+head+'</span></div><div class="mapbody"><ol class="trail'+(MAP_COLS<CIDS.length+1?' rows':'')+'" style="--n:'+MAP_COLS+'" aria-label="'+CIDS.length+' 個觀念的路線">'+lis+'</ol>'+plant+'</div>';
+  mapKey=key; mapSeenMem=t.level; MAPX.writeSeen(seenStorage(),t.level);
+  box.querySelectorAll("button.stn").forEach(function(b){b.onclick=function(){
+    var cid=b.dataset.cid;
+    if(!conceptOn(cid)){toast("這一站還沒開放。");return;}
+    renderConcept(cid);
+  };});
+  showMap(true);
+}
 /* ---------- 首頁 ---------- */
 var screen="home", booted=false;   // booted：開頁那一次 openFromHash 之後才為 true（回首頁才清 #c/ 網址）
 function route(){
@@ -2335,10 +2567,10 @@ function renderTeach(){
 /* ---------- 實驗室：先預測才能操作；完成才算數 ---------- */
 var labTimer=null;
 function stopAnim(){if(labTimer){cancelAnimationFrame(labTimer);labTimer=null;}}
-function leaveLab(){stopAnim();lab=null;}
+function leaveLab(){stopAnim();lab=null;showMap(false);}   // 地圖只在首頁出現：其他畫面都先經過這裡（renderHome 之後會再打開）
 var lab=null;
 function openLab(cid,ctx){
-  stopAnim(); screen="lab";
+  stopAnim(); showMap(false); screen="lab";
   var con=CONCEPTS[cid], key=con.lab, pr=PREDICT[cid], tasks=EXPLAIN[cid][0].lines.map(function(t,i){return "看懂第 "+(i+1)+" 句："+t;}), runId=newId("r");
   var r=act({type:"labStart",runId:runId,lab:key,tasks:tasks.length,answer:pr.a,from:ctx.from,card:ctx.card||undefined});
   if(!r.ok) return;
@@ -2451,7 +2683,7 @@ function renderSummary(){
     try{navigator.clipboard.writeText(t).then(done,fail);}catch(e){fail();}
   });
 }
-function renderSide(){header();banners();renderConcepts();renderCal();renderExit();renderSummary();renderSettings();}
+function renderSide(){header();banners();renderConcepts();renderCal();renderExit();renderSummary();renderSettings();if(screen==="home")renderMap();}
 
 /* ---------- 設定 ---------- */
 function renderSettings(){
