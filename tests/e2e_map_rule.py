@@ -89,8 +89,17 @@ def main():
               return [Math.round(e.getBoundingClientRect().top),L,R,e.dataset.cid||'goal'];})""")
             over = [(a[3], b2[3], round(a[2] - b2[1], 1)) for a, b2 in zip(boxes, boxes[1:]) if abs(a[0] - b2[0]) < 5 and a[2] > b2[1] - 2]
             check(f"{tag} ④ 同一列的站名、進度不互相重疊", not over, over[:3])
+            # ⑥ 2026-10-14 律師（孩子要「直接闖關」）：點地圖的站 → 觀念頁標題下面、說明之前就有「直接闖關」，按下去開始這一站全部題目
+            pg.locator(f'#mapBox .stn[data-cid="{d["ids"][1]}"]').click()
+            pg.wait_for_selector("#cGo")
+            gy = pg.locator("#cGo").bounding_box()["y"]
+            ey = pg.locator("#main .remedy").first.bounding_box()["y"] if pg.locator("#main .remedy").count() else 1e9
+            pg.locator("#cGo").click()
+            pg.wait_for_selector("#main .q")
+            qh = pg.locator("#main .qhead").inner_text()
+            check(f"{tag} ⑥ 觀念頁說明之前就有「直接闖關」，按下去開始這站全部 {d['n2']} 題", gy < ey and f"1 / {d['n2']}" in qh, (gy, ey, qh[-24:]))
             check(f"{tag} ⑤ 頁面沒有 JS 錯誤", not errs, errs)
-            total += 5
+            total += 6
             b.close()
     print(f"{total - len(FAILS)}/{total} PASS")
     return 1 if FAILS else 0

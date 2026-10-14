@@ -609,6 +609,8 @@ function renderConcept(cid){
   var el=$("#main");
   el.innerHTML='<div style="display:grid;gap:14px"><div class="qhead"><span>'+esc(UNITS[c.unit])+'</span><span>'+STAGE[v.stages[cid]]+'</span></div><h2>'+esc(c.title)+'</h2>'+
     (stuck?'<div class="banner info"><strong>這個觀念先和爸媽一起看圖解</strong><span class="small">爸媽在「家長摘要」按「已經陪她看過」以後，再來練這個觀念的題目。</span></div>':'')+
+    // 2026-10-14 律師（孩子要「直接闖關」）：標題下面就放闖關鈕＝練這個觀念的全部題目；做完全部＝地圖走過這一站
+    (stuck?'':'<div class="row" id="cGoRow"><button class="btn" type="button" id="cGo">直接闖關：做完這 '+conceptCards(cid).length+' 題</button><span class="small muted">'+esc((MAPX&&MAPX.RULE)||"")+'</span></div>')+
     explainBlock(ex)+videoBlock(cid)+
     '<div class="row"><button class="btn" type="button" id="cLab">一句一句看懂</button>'+(mine&&!v.completed&&!stuck?'<button class="btn ghost" type="button" id="cFocus">先練這個觀念（今天 '+mine+' 張）</button>':'')+
     (stuck?'':'<button class="btn ghost" type="button" id="cAll">練這個觀念的全部 '+conceptCards(cid).length+' 題</button>')+
@@ -616,6 +618,7 @@ function renderConcept(cid){
   on("#cLab",function(){openLab(cid,{from:"menu"});});
   on("#cFocus",function(){beginRound({type:"sessionStart",focus:cid});});
   on("#cAll",function(){beginRound({type:"sessionStart",kind:"review",ids:conceptCards(cid)});});
+  on("#cGo",function(){beginRound({type:"sessionStart",kind:"review",ids:conceptCards(cid)});});
   on("#cMore",function(){var b=$("#main .remedy");if(b)b.outerHTML=explainBlock(EXPLAIN[cid][1]);$("#cMore").hidden=true;});
   on("#cBack",renderHome);
   wireVideos(el);
