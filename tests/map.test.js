@@ -64,3 +64,13 @@ test("每一階的觀看紀錄都讀得回來（含兩位數的第 10、11 階�
   for (let n = 0; n < M.PLANT.length; n++) { M.writeSeen(s, n); assert.equal(M.readSeen(s), n, "第 " + n + " 階"); }
   for (const bad of ["01", String(M.PLANT.length), "100", " 3"]) { m[M.SEEN_KEY] = bad; assert.equal(M.readSeen(s), null, bad); }
 });
+
+test("每一階的圖都畫在框內（viewBox 0 0 120 150），不會被切掉", () => {
+  for (let n = 0; n < M.PLANT.length; n++) {
+    const svg = M.plantSvg(n);
+    for (const m of svg.matchAll(/[ML]\s*(-?[\d.]+)[ ,](-?[\d.]+)/g)) {
+      const x = +m[1], y = +m[2];
+      assert.ok(x >= 0 && x <= 120 && y >= 0 && y <= 150, `第 ${n} 階有點落在框外：${x},${y}`);
+    }
+  }
+});

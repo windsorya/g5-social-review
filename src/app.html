@@ -413,7 +413,14 @@ var MAP_LOCK='<svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"
 var MAP_CUP='<svg width="30" height="30" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0z" fill="currentColor"/><path d="M7 6H4v1.5A3.5 3.5 0 0 0 7.5 11M17 6h3v1.5A3.5 3.5 0 0 1 16.5 11" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 14v3M8 20h8M9.5 17h5v3h-5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
 var MAP_STARS='<svg class="stars" viewBox="0 0 150 180" aria-hidden="true">'+[[30,40],[118,30],[18,110],[128,96],[75,8]].map(function(p){var x=p[0],y=p[1];return '<path d="M'+x+' '+(y-9)+'l2.6 6.2 6.4.4-4.9 4.1 1.6 6.3-5.7-3.5-5.7 3.5 1.6-6.3-4.9-4.1 6.4-.4z"/>';}).join("")+'</svg>';
 function seenStorage(){try{return window.localStorage;}catch(e){return null;}}
-function showMap(on){var b=$("#mapBox");if(b)b.hidden=!on;}
+// mapAnim：本次畫地圖時播了長大動畫、播之前看過第幾階。開頁啟動途中（booted 還是 false）地圖就被收起來
+// （從 #c/ 連結開頁：首頁先畫一次就立刻切觀念頁）＝孩子根本沒看到 ⇒ 退回「看過」紀錄，回首頁時重播（2026-10-14 Codex 審 8066e66）。
+// 開頁完成後孩子自己點走不算（看到一半也算看過，e2e「已看過不再播動畫」）。沒有 #c/ 連結的站（自然站）沒有 booted，這段不作用。
+var mapAnim=null;
+function showMap(on){var b=$("#mapBox");if(!b)return;
+  if(!on&&mapAnim&&!b.hidden&&typeof booted!=="undefined"&&!booted){mapSeenMem=mapAnim.prev;if(mapAnim.prev===null){try{var st=seenStorage();if(st)st.removeItem(MAPX.SEEN_KEY);}catch(e){}}else MAPX.writeSeen(seenStorage(),mapAnim.prev);mapKey=null;}
+  if(!on)mapAnim=null;
+  b.hidden=!on;}
 function mapStill(box){box.querySelectorAll("svg.pl.grow").forEach(function(e){e.classList.remove("grow");});box.querySelectorAll(".stars").forEach(function(e){e.remove();});}
 function renderMap(){
   var box=$("#mapBox"); if(!box||!MAPX) return;
@@ -439,6 +446,7 @@ function renderMap(){
     (t.allDone?'<div class="mapwin" role="status">探險地圖全部走完了！去跟爸媽說</div>'+(fx.celebrate&&!reduce?MAP_STARS.replace('class="stars"','class="stars go"'):''):
      t.level<MAPX.PLANT.length-1?'<div class="next"><span class="ghostbox">'+MAPX.plantSvg(t.level+1,{ghost:true})+'<b aria-hidden="true">？</b></span><span>再走過一站，看看它會變成什麼</span></div>':'')+'</div>';
   box.innerHTML='<div class="maphead"><h2 id="mapT">探險地圖</h2><span id="mapCount">'+head+'</span></div><div class="mapbody"><ol class="trail'+(MAP_COLS<CIDS.length+1?' rows':'')+'" style="--n:'+MAP_COLS+'" aria-label="'+CIDS.length+' 個觀念的路線">'+lis+'</ol>'+plant+'</div>';
+  mapAnim=anim?{at:Date.now(),prev:seen}:null;
   mapKey=key; mapSeenMem=t.level; MAPX.writeSeen(seenStorage(),t.level);
   box.querySelectorAll("button.stn").forEach(function(b){b.onclick=function(){
     var cid=b.dataset.cid;
