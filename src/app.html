@@ -75,6 +75,7 @@ h1,h2,h3{font-family:var(--f-display);font-weight:400;margin:0;text-wrap:balance
 @media (max-width:560px){.cal{grid-template-columns:repeat(7,minmax(0,1fr))}}
 .cal i{display:flex;align-items:center;justify-content:center;height:34px;border-radius:8px;background:var(--line-soft);color:var(--muted);font-size:13px;font-style:normal;font-variant-numeric:tabular-nums}
 .cal i.on{background:var(--leaf);color:#fff}
+.cal i.on.mk{background:var(--leaf-soft);color:var(--leaf);box-shadow:inset 0 0 0 2px var(--leaf)}
 .cal i.today{box-shadow:inset 0 0 0 2px var(--sun)}
 .cal i.exam{background:var(--sun-soft);color:var(--sun-deep)}
 /* 練習卡 */
@@ -199,6 +200,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
   <section style="display:grid;gap:10px">
     <div class="row" style="justify-content:space-between"><span class="sect-t">到考試的每一天</span><span class="muted small" id="streak"></span></div>
     <div class="cal" id="cal"></div>
+    <div id="makeup" style="display:grid;gap:8px"></div>
   </section>
   <details id="exitBox"><summary>出口題（爸媽隔天唸給她聽）</summary><div id="exitList"></div></details>
   <details id="parentBox"><summary>家長摘要</summary><div id="summary"></div></details>
@@ -442,15 +444,25 @@ function renderConcepts(){
     renderConcept(cid);
   };});
 }
+// 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）：今天的卡做完後，日曆下方列出之前沒練的日子，按了補一份那天的新卡。
+// 補做過的日子在日曆上是淺綠色（那天的作答紀錄都是之後才做的＝補做）；連續天數照算。
+var MAKEUP_MSG={MAKEUP_TODAY_FIRST:"先把今天的卡做完，才能補做前面的日子。",MAKEUP_DAY:"這一天已經練過了，不用補。",MAKEUP_EMPTY:"現在沒有可以補做的卡了，每一張都練過也都會了。"};
+function madeUp(s,k){return !s.log.some(function(e){return e.d===k;});}
 function renderCal(){
   var s=S(), v=V(), cells=[], k=START;
   while(k<=EXAM){
-    var d=s.days[k], cls=(d&&d.touched.length)?"on":"";
+    var d=s.days[k], on=d&&d.touched.length, mk=on&&k<v.today&&madeUp(s,k), cls=on?(mk?"on mk":"on"):"";
     if(k===v.today) cls+=" today"; if(k===EXAM) cls+=" exam";
-    cells.push('<i class="'+cls+'" title="'+md(k)+'">'+(k===EXAM?"考":(+k.slice(8,10)))+'</i>');
+    cells.push('<i class="'+cls+'" title="'+md(k)+(mk?"（補做）":"")+'">'+(k===EXAM?"考":(+k.slice(8,10)))+'</i>');
     k=C.addDays(k,1);
   }
   $("#cal").innerHTML=cells.join("");
+  var miss=C.missedDays(s,START,v.today), mkEl=$("#makeup");
+  if(mkEl){
+    mkEl.innerHTML=!miss.length?'':!v.completed?'<span class="small muted">前面有 '+miss.length+' 天沒練。今天的卡做完後，可以在這裡補做。</span>':
+      '<span class="small muted">補做前面沒練的日子（每天補一份新卡）：</span><div class="row">'+miss.map(function(x){return '<button class="btn ghost sm" type="button" data-mk="'+x+'">補做 '+md(x)+'</button>';}).join("")+'</div>';
+    mkEl.querySelectorAll("button[data-mk]").forEach(function(b){b.onclick=function(){var r=beginRound({type:"sessionStart",kind:"makeup",day:b.dataset.mk});if(!r.ok&&r.error)toast(MAKEUP_MSG[r.error]||"現在不能補做");};});
+  }
   var n=0; k=v.today;
   if(!(s.days[k]&&s.days[k].touched.length)) k=C.addDays(k,-1);
   while(s.days[k]&&s.days[k].touched.length){n++;k=C.addDays(k,-1);}
@@ -531,7 +543,7 @@ function renderPractice(){
   if(!c) return renderEnd();
   ui={hint:false,cardId:id,variation:se.kinds[id]==="variation"};
   var con=CONCEPTS[c.concept], total=se.answered.length+se.queue.length, pos=se.answered.length+1;
-  var h='<div class="qhead"><span>'+(se.kind==="review"?'<span class="tag" style="margin:0 6px 0 0">小考複習</span>':'')+esc(UNITS[con.unit])+'・'+esc(con.title)+(ui.variation?'<span class="tag">同觀念換一題確認</span>':'')+'</span><span>'+pos+' / '+total+'</span></div><div class="bar"><i style="width:'+Math.round((pos-1)/total*100)+'%"></i></div>';
+  var h='<div class="qhead"><span>'+(se.kind==="review"?'<span class="tag" style="margin:0 6px 0 0">小考複習</span>':se.makeup?'<span class="tag" style="margin:0 6px 0 0">補做 '+md(se.makeup)+'</span>':'')+esc(UNITS[con.unit])+'・'+esc(con.title)+(ui.variation?'<span class="tag">同觀念換一題確認</span>':'')+'</span><span>'+pos+' / '+total+'</span></div><div class="bar"><i style="width:'+Math.round((pos-1)/total*100)+'%"></i></div>';
   h+=questionHtml(c,"practice");
   var tools='<div class="tools"><label><input type="checkbox" id="unsure"> 我不太確定</label>'+(c.hint?'<button class="btn ghost sm" type="button" id="hintBtn">給我一點提示</button>':'')+'</div><div class="hint" id="hintBox" hidden></div>';
   if(c.type==="map"){

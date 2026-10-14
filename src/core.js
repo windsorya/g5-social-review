@@ -99,6 +99,22 @@
     var pick = {}; due.concat(fresh.slice(0, quota)).forEach(function (id) { pick[id] = 1; });
     return cards.filter(function (c) { return pick[c.id]; }).map(function (c) { return c.id; });   // 固定題庫順序
   }
+  // 補做那天的卡：先排還沒練過的新卡（照那天的新卡數量，不重複今天的計畫）；新卡用完了，就排練過但還沒畢業、今天沒碰過的卡
+  function makeupPlan(state, bank, today0, td, mk) {
+    var cards = enabledCards(state, bank), n = newQuota(mk);
+    var fresh = cards.filter(function (c) { return cardState(state, c.id).seen === 0 && today0.planIds.indexOf(c.id) < 0; }).map(function (c) { return c.id; });
+    if (fresh.length) return fresh.slice(0, n);
+    var hit = {};
+    state.log.forEach(function (e) { if (e.d === td) hit[e.card] = 1; });   // 今天任何回合（含別次補做）練過的卡不再排
+    var old = cards.filter(function (c) { var cs = cardState(state, c.id); return cs.seen > 0 && !retired(cs) && today0.touched.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
+    return reviewOrder(state, bank, old).slice(0, n);
+  }
+  // 可以補做的日子：從 start 到昨天、那天一張都沒練過
+  function missedDays(state, start, today0) {
+    var out = [], k = start;
+    while (k < today0) { if (!(state.days[k] && state.days[k].touched.length)) out.push(k); k = addDays(k, 1); }
+    return out;
+  }
   // 每日第一次操作就把當天計畫固定下來；之後匯入、開放單元都等隔天才納入（矩陣 29）
   function ensureDay(state, bank, day) {
     if (!state.days[day]) { var d = blankDay(); d.planIds = computePlan(state, bank, day); state.days[day] = d; }
@@ -189,7 +205,19 @@
       case "tick": break;
 
       case "sessionStart": {
-        if (action.kind === "redo" || action.kind === "review") {
+        if (action.kind === "makeup") {
+          // 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）：今天的卡做完後，選一個之前沒練的日子補一份。
+          // 存法不加新欄位（舊版頁面的讀檔檢查才不會判壞）：補做那天照一般的 days[那天] 格式存，回合是 kind "plan" 加 makeup:那天。
+          // 卡片的間隔複習一律用今天的日期算（她真的是今天練的），只有「這天練過」記在補做那天。
+          var mk = action.day;
+          if (!isDay(mk) || mk >= today || (s.days[mk] && s.days[mk].touched.length)) return fail(state0, "MAKEUP_DAY");
+          if (!dayCompleted(day)) return fail(state0, "MAKEUP_TODAY_FIRST");
+          var mplan = makeupPlan(s, bank, day, today, mk);
+          if (!mplan.length) return fail(state0, "MAKEUP_EMPTY");
+          var md0 = blankDay(); md0.planIds = mplan; s.days[mk] = md0;
+          s.session = { day: today, kind: "plan", queue: stuckLast(s, bank, sessionOrder(s, bank, today, mplan)), answered: [], wrong: [], kinds: {}, makeup: mk };
+          s.session.size = s.session.queue.length;
+        } else if (action.kind === "redo" || action.kind === "review") {
           // redo＝再練答錯的；review＝小考前把整個單元／觀念練一次。作答規則一樣，不改當日計畫與完成判定
           var ids = uniq((Array.isArray(action.ids) ? action.ids : []).filter(function (id) { return !!cardById(s, bank, id); }));
           var rq = stuckLast(s, bank, action.kind === "review" ? reviewOrder(s, bank, ids) : ids);
@@ -219,7 +247,9 @@
         var cs = s.cards[card.id] = clone(cardState(s, card.id));
         var sessKind = s.session && s.session.kinds[card.id];
         var variation = !!action.variation || sessKind === "variation";
-        var first = day.touched.indexOf(card.id) < 0;
+        // 補做回合：「這天練過」記在補做那天（target）；間隔複習照今天算
+        var mkd = s.session && s.session.makeup && s.days[s.session.makeup] || null, target = mkd || day;
+        var first = day.touched.indexOf(card.id) < 0 && (!mkd || mkd.touched.indexOf(card.id) < 0);
         var shaky = !action.ok || !!action.hint || !!action.unsure;
         cs.seen++;
         if (cs.needsRecheck) delete cs.needsRecheck;
@@ -235,11 +265,13 @@
           cs.due = addDays(today, 1);   // 第一次見到就是變式或重答：至少明天要回來
         }
         if (cs.goodDays.length > 3) cs.goodDays = cs.goodDays.slice(-3);
-        if (first) day.touched.push(card.id);
-        var inPlan = day.planIds.indexOf(card.id) >= 0;
-        if (inPlan && day.doneIds.indexOf(card.id) < 0) day.doneIds.push(card.id);
-        if (!inPlan || !first) extra();
-        else if (wasDone) extra();
+        if (first) target.touched.push(card.id);
+        var inPlan = target.planIds.indexOf(card.id) >= 0;
+        if (inPlan && target.doneIds.indexOf(card.id) < 0) target.doneIds.push(card.id);
+        if (!mkd) {
+          if (!inPlan || !first) extra();
+          else if (wasDone) extra();
+        }
         openExit(s, card.concept, today);
         pushCap(s.log, { op: action.id, d: today, card: card.id, c: card.concept, ok: action.ok,
                          hint: !!action.hint, unsure: !!action.unsure, variation: variation, first: first }, LOG_KEEP);
@@ -457,6 +489,8 @@
   function endTitle(v) {
     // R9（4agent）：停輪是要爸媽陪看的訊號，優先於每日完成／空計畫，不能被蓋掉
     if (v.session && v.session.halted) return "這一輪先停在這裡";
+    if (v.session && v.session.makeup && !v.session.queue.length && v.session.answered.length)
+      return (+v.session.makeup.slice(5, 7)) + "/" + (+v.session.makeup.slice(8, 10)) + " 補做完成";
     if (!v.planIds.length) return "今天沒有排定卡片";
     if (v.completed) return "今天的卡片都做完了";
     if (v.session && !v.session.queue.length && v.session.answered.length) return "這一輪完成了";
@@ -510,7 +544,8 @@
       if (!isObj(se) || !isDay(se.day) || ["plan", "redo", "review"].indexOf(se.kind) < 0 || !strList(se.queue) ||
           !strList(se.answered) || !strList(se.wrong) || !isObj(se.kinds) ||
           (se.size !== undefined && !isNat(se.size)) || (se.halted !== undefined && !isBool(se.halted)) ||
-          (se.focus !== undefined && !bank.concepts[se.focus])) bad("session");
+          (se.focus !== undefined && !bank.concepts[se.focus]) ||
+          (se.makeup !== undefined && (se.kind !== "plan" || !isDay(se.makeup) || !isObj(o.days[se.makeup])))) bad("session");
       else if (!uniqList(se.queue) || !uniqList(se.answered) || !uniqList(se.wrong)) bad("session duplicate");
     }
     if (!Array.isArray(o.log) || !o.log.every(function (e) {
@@ -711,7 +746,7 @@
     dayKey: dayKey, isDay: isDay, addDays: addDays, diffDays: diffDays, weekday: weekday,
     validCard: validCard, blankState: blankState, reduce: reduce, view: view, endTitle: endTitle, exitList: exitList,
     checkState: checkState, decode: decode, migrateV1: migrateV1, createStore: createStore,
-    cardState: cardState, cardById: cardById, conceptOn: conceptOn, allCards: allCards,
+    cardState: cardState, cardById: cardById, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
     dissolveNew: dissolveNew, dissolveAddSugar: dissolveAddSugar, dissolveAddSalt: dissolveAddSalt,
     dissolveStep: dissolveStep, dissolveRead: dissolveRead, shadowFromSun: shadowFromSun, dirName: dirName
   };

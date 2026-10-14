@@ -899,3 +899,80 @@ test("M6 存檔被刪掉後：再作答只存新的、清除全部紀錄可以�
   assert.ok(S.dispatch(op("reset")).ok, "清除全部作答紀錄要成功");
   assert.deepEqual(Object.keys(JSON.parse(mem.raw[C.LS_KEY]).cards), []);
 });
+
+// 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）
+const OLD = require("./fixtures/core.pre-makeup-d7d1d78.js");   // 加補做前、線上那一版核心（git show d7d1d78:src/core.js）
+const MK = "2026-10-18";
+function doneToday(b) {
+  let s = C.blankState(); s = run(s, b, NOON(D), op("tick"));
+  s.days[D].planIds.forEach((id) => { s = run(s, b, NOON(D), op("answer", { cardId: id, ok: true })); });
+  return s;
+}
+const B12 = bank(Array.from({ length: 12 }, (_, i) => "c" + (i + 1)));
+
+test("MK1 今天做完後補做：那天記成練過（新卡 5 張、不重複今天的），間隔複習照今天算，今天不算加碼", () => {
+  let s = doneToday(B12);
+  const today = s.days[D].planIds.slice();
+  assert.deepEqual(C.missedDays(s, "2026-10-17", D), ["2026-10-17", "2026-10-18", "2026-10-19"]);
+  s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));
+  const plan = s.days[MK].planIds;
+  assert.equal(plan.length, 5); assert.ok(plan.every((id) => today.indexOf(id) < 0));
+  assert.equal(s.session.makeup, MK); assert.equal(s.session.kind, "plan");
+  plan.forEach((id) => { s = run(s, B12, NOON(D), op("answer", { cardId: id, ok: true })); });
+  assert.deepEqual(s.days[MK].touched.sort(), plan.slice().sort());
+  assert.deepEqual(s.days[MK].doneIds.sort(), plan.slice().sort());
+  assert.equal(s.days[D].touched.length, 5, "今天的紀錄不動"); assert.equal(s.days[D].extraDone, false);
+  assert.deepEqual(s.cards[plan[0]].goodDays, [D], "有效日期是今天");
+  assert.equal(s.cards[plan[0]].due, "2026-10-21");
+  assert.deepEqual(C.missedDays(s, "2026-10-17", D), ["2026-10-17", "2026-10-19"]);
+  assert.equal(C.endTitle(C.view(s, env(B12, NOON(D)))), "10/18 補做完成");
+  assert.deepEqual(C.checkState(s, B12), []);
+});
+
+test("MK2 線上舊版核心（d7d1d78）讀補做後的存檔：不判壞；在補做回合中作答也不出錯", () => {
+  let s = doneToday(B12);
+  s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));
+  assert.deepEqual(OLD.checkState(s, B12), [], "補做回合進行中");
+  const r = OLD.reduce(s, op("answer", { cardId: s.days[MK].planIds[0], ok: true }), { bank: B12, now: NOON(D) });
+  assert.ok(!r.error, String(r.error));
+  assert.deepEqual(OLD.checkState(r.state, B12), []);
+  s.days[MK].planIds.forEach((id) => { s = run(s, B12, NOON(D), op("answer", { cardId: id, ok: true })); });
+  assert.deepEqual(OLD.checkState(s, B12), [], "補做完成後");
+});
+
+test("MK3 不能補的情況：今天還沒做完、那天已練過、今天或以後、壞日期", () => {
+  let s = C.blankState(); s = run(s, B12, NOON(D), op("tick"));
+  assert.equal(C.reduce(s, op("sessionStart", { kind: "makeup", day: MK }), env(B12, NOON(D))).error, "MAKEUP_TODAY_FIRST");
+  s = doneToday(B12);
+  [D, "2026-10-21", "10/18", null].forEach((d) => assert.equal(C.reduce(s, op("sessionStart", { kind: "makeup", day: d }), env(B12, NOON(D))).error, "MAKEUP_DAY", String(d)));
+  s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));
+  s = run(s, B12, NOON(D), op("answer", { cardId: s.days[MK].planIds[0], ok: true }));
+  assert.equal(C.reduce(s, op("sessionStart", { kind: "makeup", day: MK }), env(B12, NOON(D))).error, "MAKEUP_DAY", "練過一張就算練過");
+});
+
+test("MK4 新卡用完改排練過但還沒畢業的卡；全部畢業才說沒有卡可補", () => {
+  const b = bank(["a1", "a2", "a3", "a4", "a5"]);
+  let s = doneToday(b);
+  assert.equal(C.reduce(s, op("sessionStart", { kind: "makeup", day: MK }), env(b, NOON(D))).error, "MAKEUP_EMPTY", "今天都碰過、沒新卡");
+  // 8 張卡：10/20 練 a1–a5、10/21 練全部 8 張、10/22 只到期 a6–a8 ⇒ a1–a5 練過、沒畢業、今天沒碰
+  const b8 = bank(["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"]);
+  s = doneToday(b8);
+  ["2026-10-21", "2026-10-22"].forEach((d) => {
+    s = run(s, b8, NOON(d), op("tick"));
+    s.days[d].planIds.forEach((id) => { s = run(s, b8, NOON(d), op("answer", { cardId: id, ok: true })); });
+  });
+  assert.deepEqual(s.days["2026-10-22"].planIds, ["a6", "a7", "a8"]);
+  s = run(s, b8, NOON("2026-10-22"), op("sessionStart", { kind: "makeup", day: MK }));
+  assert.deepEqual(s.days[MK].planIds.slice().sort(), ["a1", "a2", "a3", "a4", "a5"]);
+  s.days[MK].planIds.forEach((id) => { s = run(s, b8, NOON("2026-10-22"), op("answer", { cardId: id, ok: true })); });
+  assert.equal(C.reduce(s, op("sessionStart", { kind: "makeup", day: "2026-10-17" }), env(b8, NOON("2026-10-22"))).error, "MAKEUP_EMPTY", "今天別次補做練過的卡不再排");
+});
+
+test("MK5 補做回合跨午夜：隔天回合換成當天計畫，已補的那天保留", () => {
+  let s = doneToday(B12);
+  s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));
+  s = run(s, B12, NOON(D), op("answer", { cardId: s.days[MK].planIds[0], ok: true }));
+  s = run(s, B12, NOON("2026-10-21"), op("tick"));
+  assert.equal(s.session.makeup, undefined); assert.equal(s.days[MK].touched.length, 1);
+  assert.deepEqual(C.checkState(s, B12), []);
+});
