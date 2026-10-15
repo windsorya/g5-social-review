@@ -2612,6 +2612,9 @@ function openLab(cid,ctx){
   el.scrollIntoView({behavior:"smooth",block:"start"});
 }
 function run(){return S().labRuns[lab.runId];}
+// 存檔被別處清掉（或同步換檔）後，這一輪的紀錄已不在磁碟上，核心回 NO_RUN：照磁碟現況回首頁，不留在原畫面按了沒反應
+// （Codex 審 g5-chinese-review c28888ed #1541，四站同型；同 836cbb9「再練答錯的」）
+function labGone(r){if(!r||r.error!=="NO_RUN")return false;stopAnim();renderHome();return true;}
 function drawPredict(){
   var rr=run(), pr=lab.pr, all=rr.tasksDone.length>=rr.tasks;
   var h='<strong>'+esc(pr.q)+'</strong><div class="chips">'+pr.opts.map(function(o,i){return '<button class="chip'+(rr.prediction===i?' sel':'')+'" type="button" data-g="'+i+'"'+(rr.prediction!==null?' disabled':'')+'>'+esc(o)+'</button>';}).join("")+'</div>';
@@ -2621,7 +2624,7 @@ function drawPredict(){
   $("#labPredict").innerHTML=h;
   $("#labPredict").querySelectorAll("button[data-g]").forEach(function(b){b.onclick=function(){
     var r=act({type:"labPredict",runId:lab.runId,choice:+b.dataset.g});
-    if(!r.ok) return;
+    if(labGone(r)||!r.ok) return;
     $("#labBody").hidden=false; $("#labTask").hidden=false;
     drawPredict(); drawTasks(); drawNav();
     if(LABS[lab.key]&&LABS[lab.key].after) LABS[lab.key].after();
@@ -2637,10 +2640,12 @@ function drawTasks(){
 function check(i){
   if(!lab) return false;
   var rr=run();
-  if(!rr||rr.phase==="predict") return false;
+  if(!rr){stopAnim();renderHome();return false;}   // 記憶體裡已沒有這一輪（切回頁面時已讀到被清掉的存檔）
+  if(rr.phase==="predict") return false;
   // Codex 審 e195ef98：這一句是之前補存進去的（visibilitychange／再存一次），也要重繪任務與完成鈕，不然完成鈕一直停用
   if(rr.tasksDone.indexOf(i)>=0){drawTasks();drawNav();if(rr.tasksDone.length>=rr.tasks)drawPredict();return true;}
   var r=act({type:"labTask",runId:lab.runId,task:i});
+  if(labGone(r)) return false;
   if(r.ok){drawTasks();drawNav();if(run().tasksDone.length>=run().tasks)drawPredict();}
   return !!(r.ok||r.dup);
 }
@@ -2648,11 +2653,11 @@ function drawNav(){
   var rr=run(), all=rr.prediction!==null&&rr.tasksDone.length>=rr.tasks, nav=$("#labNav");
   if(lab.ctx.from==="wrong"){
     nav.innerHTML='<button class="btn" type="button" id="labDone"'+(all?'':' disabled')+'>'+(all?'我看懂了，換一題確認':(rr.prediction===null?'先想一想，再看解說':'每一句都看過後就能換一題確認'))+'</button><button class="btn ghost sm" type="button" id="labSkip">先回到練習</button>';
-    on("#labDone",function(){stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(!r.ok&&!r.dup)return;lab=null;screen="practice";route();});
+    on("#labDone",function(){stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(labGone(r))return;if(!r.ok&&!r.dup)return;lab=null;screen="practice";route();});
     on("#labSkip",function(){stopAnim();lab=null;screen="practice";route();});
   }else{
     nav.innerHTML='<button class="btn" type="button" id="labDone"'+(all?'':' disabled')+'>'+(all?'完成了':'每一步都看過後按這裡')+'</button><button class="btn ghost sm" type="button" id="labHome">回首頁</button>';
-    on("#labDone",function(){stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(!r.ok&&!r.dup)return;lab=null;
+    on("#labDone",function(){stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(labGone(r))return;if(!r.ok&&!r.dup)return;lab=null;
       $("#main").innerHTML='<div class="done"><b class="t">看完了</b><p class="muted" style="margin:0">把解說看懂了，再回去練卡片或考考爸媽。</p><div class="row" style="justify-content:center"><button class="btn ghost" type="button" id="back3">回首頁</button></div></div>';on("#back3",renderHome);renderSide();});
     on("#labHome",function(){stopAnim();lab=null;renderHome();});
   }
