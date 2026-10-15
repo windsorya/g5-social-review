@@ -732,6 +732,7 @@ function submit(c,ok,m,selfGraded){
 // 兩個「再存一次」（上方提示列、題目下方）走同一條路：存成功才公布回饋
 function retrySave(){
   var rr=store.retry(); banners();
+  if(screen==="lab"&&labGone(rr)) return;   // 待存的是這一輪的一步、這一輪卻已被別處刪掉：照磁碟現況回首頁（Codex 審 e195ef98 第 3 項，#1542）
   var f=$("#saveFail");
   if(f&&pending){ if(store.accepted(pending.a.id)){f.remove();feedback(pending,(rr&&rr.info)||{});} return; }
   if(rr.ok){ if(!labRefresh()) route(); }

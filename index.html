@@ -1915,7 +1915,12 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
       }
       var r = reduce(st.state, action, env());
       if (r.error || r.dup) {
-        if (r.dup && st.pendingAction && action.id === st.pendingAction.id) st.pendingAction = null;
+        // 重試的就是待存那筆、卻已套不上磁碟現況（例如那一輪被別處刪掉，NO_RUN）：與 flushPending 一樣丟掉，
+        // 磁碟讀得到、沒有別的東西等著存，就回到正常狀態——不然「再存一次」按了永遠沒反應、提示列卡著（Codex 審 e195ef98 第 3 項，#1542）
+        if (st.pendingAction && action.id === st.pendingAction.id) {
+          st.pendingAction = null;
+          if (r.error && !st.loadError) st.saveStatus = "ok";
+        }
         return { ok: !r.error, error: r.error, dup: !!r.dup, info: r.info, state: st.state };
       }
       var w = write(r.state);
@@ -2423,6 +2428,7 @@ function submit(c,ok,m,selfGraded){
 // 兩個「再存一次」（上方提示列、題目下方）走同一條路：存成功才公布回饋
 function retrySave(){
   var rr=store.retry(); banners();
+  if(screen==="lab"&&labGone(rr)) return;   // 待存的是這一輪的一步、這一輪卻已被別處刪掉：照磁碟現況回首頁（Codex 審 e195ef98 第 3 項，#1542）
   var f=$("#saveFail");
   if(f&&pending){ if(store.accepted(pending.a.id)){f.remove();feedback(pending,(rr&&rr.info)||{});} return; }
   if(rr.ok){ if(!labRefresh()) route(); }

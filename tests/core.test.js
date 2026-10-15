@@ -900,6 +900,29 @@ test("M6 存檔被刪掉後：再作答只存新的、清除全部紀錄可以�
   assert.deepEqual(Object.keys(JSON.parse(mem.raw[C.LS_KEY]).cards), []);
 });
 
+test("M7 待存的是一輪實驗的一步、那一輪又被別處刪掉：重試回 NO_RUN 並丟掉待存、狀態回 ok，不會卡在「再存一次」（Codex 審 e195ef98 第 3 項）", () => {
+  const b = bank(["s1"]); const mem = flakyStorage();
+  const S = C.createStore({ storage: mem, bank: b, clock: () => NOON(D) }); S.load();
+  assert.ok(S.dispatch(op("labStart", { runId: "R", lab: "soc", tasks: 3, answer: 0 })).ok);
+  assert.ok(S.dispatch(op("labPredict", { runId: "R", choice: 0 })).ok);
+  mem.setWrite(true); const T1 = op("labTask", { runId: "R", task: 0 });
+  assert.equal(S.dispatch(T1).ok, false); mem.setWrite(false);
+  assert.deepEqual([S.get().saveStatus, S.get().pendingAction.id], ["failed", T1.id]);
+  mem.removeItem(C.LS_KEY);
+  const r = S.retry();
+  assert.deepEqual([r.ok, r.error], [false, "NO_RUN"]);
+  assert.deepEqual([S.get().pendingAction, S.get().saveStatus], [null, "ok"], "套不上的待存要丟掉、提示列要消失");
+  assert.equal(S.retry().nothing, true, "再按一次不會又重試同一筆");
+  assert.equal(mem.raw[C.LS_KEY], undefined, "不得把刪掉的那一輪寫回去");
+  // 讀不到存檔（不是刪掉）時照舊：留著待存、狀態維持 failed
+  assert.ok(S.dispatch(op("labStart", { runId: "R2", lab: "soc", tasks: 3, answer: 0 })).ok);
+  assert.ok(S.dispatch(op("labPredict", { runId: "R2", choice: 0 })).ok);
+  mem.setWrite(true); const T2 = op("labTask", { runId: "R2", task: 0 });
+  assert.equal(S.dispatch(T2).ok, false); mem.setWrite(false); mem.setRead(true);
+  assert.equal(S.retry().ok, false); mem.setRead(false);
+  assert.deepEqual([S.get().saveStatus, S.get().pendingAction.id], ["failed", T2.id]);
+});
+
 // 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）——結算制（4agent 4A-20261014-makeup 定案）驗收矩陣
 // 前三版（每次作答決定記到哪天）被 Codex 連 3 輪 FAIL；這裡逐條收錄那些反例（T01–T16）。
 const OLD = require("./fixtures/core.pre-makeup-d7d1d78.js");   // 加補做前、線上那一版核心

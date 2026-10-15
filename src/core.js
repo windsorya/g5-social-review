@@ -696,7 +696,12 @@
       }
       var r = reduce(st.state, action, env());
       if (r.error || r.dup) {
-        if (r.dup && st.pendingAction && action.id === st.pendingAction.id) st.pendingAction = null;
+        // 重試的就是待存那筆、卻已套不上磁碟現況（例如那一輪被別處刪掉，NO_RUN）：與 flushPending 一樣丟掉，
+        // 磁碟讀得到、沒有別的東西等著存，就回到正常狀態——不然「再存一次」按了永遠沒反應、提示列卡著（Codex 審 e195ef98 第 3 項，#1542）
+        if (st.pendingAction && action.id === st.pendingAction.id) {
+          st.pendingAction = null;
+          if (r.error && !st.loadError) st.saveStatus = "ok";
+        }
         return { ok: !r.error, error: r.error, dup: !!r.dup, info: r.info, state: st.state };
       }
       var w = write(r.state);
