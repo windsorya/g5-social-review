@@ -4,7 +4,9 @@
   ① 今天的計畫裡有一張題目已不在題庫（gone），其他都做完：首頁大標題不得說「今天的卡片都做完了」，要說「今天能做的」並講明缺題
   ② 重新整理後（本頁沒有自己開的補做），共用回合裡有一份還沒結算的 10/18 補做：按「開始今天的練習」不得把它蓋掉，
      提示先結算；回合與作答都留著；按首頁「結算」才記到 10/18
-  ③ 沒有 JS 錯誤
+  ③ 補做預設關閉（2026-10-18 縮範圍）：只有說明、沒有補做按鈕
+  ④ 關閉前就開始、還沒做完的補做回合：按「開始今天的練習」不得蓋掉它，提示先做完
+  每段都驗沒有 JS 錯誤
 四站同一支（核心 G5Core、存檔 key 讀頁面上的 G5Core.LS_KEY；題號取頁面題庫）。
 執行：python3.12 tests/e2e_missing.py
 """
@@ -89,6 +91,32 @@ def main():
         d = disk["days"].get("2026-10-18") or {}
         check("② 按首頁「結算」才記到 10/18", d.get("madeUp") == TODAY and d.get("touched") == [r2], json.dumps(disk["days"], ensure_ascii=False)[:300])
         check("② 沒有 JS 錯誤", not errors, errors)
+        ctx.close()
+        # ③ 補做預設關閉（2026-10-18 縮範圍）：前面有沒練的日子，也只看到說明、沒有「補做 x/y」按鈕
+        s = json.loads(json.dumps(info["blank"]))
+        s["days"][TODAY] = {"planIds": [r1], "doneIds": [r1], "touched": [r1], "extraDone": False, "labRuns": 0, "teach": 0, "mood": None}
+        s["cards"][r1] = dict(learned); s["log"] = [entry(r1, c1, "x1")]
+        ctx, page, errors = open_page(browser, (info["key"], s))
+        page.wait_for_timeout(300)
+        mk = page.inner_text("#makeup") if page.locator("#makeup").count() else ""
+        check("③ 補做預設關閉：只顯示說明、沒有補做按鈕", "補做暫停使用" in mk and page.locator("button[data-mk]").count() == 0, mk[:200])
+        check("③ 沒有 JS 錯誤", not errors, errors)
+        ctx.close()
+
+        # ④ 還沒做完的補做回合（關閉前就開始的）：按「開始今天的練習」不得蓋掉它（Codex 審 670a476 B7）
+        s = json.loads(json.dumps(info["blank"]))
+        s["days"][TODAY] = {"planIds": [r1, r3], "doneIds": [r1], "touched": [r1, r2], "extraDone": False, "labRuns": 0, "teach": 0, "mood": None}
+        s["cards"][r1] = dict(learned); s["cards"][r2] = dict(learned)
+        s["log"] = [entry(r1, c1, "x1"), entry(r2, c2, "x2")]
+        s["session"] = {"day": TODAY, "kind": "review", "queue": [r3], "answered": [r2], "wrong": [], "kinds": {}, "makeup": "2026-10-18"}
+        ctx, page, errors = open_page(browser, (info["key"], s))
+        page.wait_for_timeout(300)
+        page.locator("#goAll").first.click()
+        page.wait_for_timeout(300)
+        se = json.loads(page.evaluate("localStorage.getItem(window.G5Core.LS_KEY)")).get("session") or {}
+        check("④ 做到一半的補做回合沒被新回合蓋掉", se.get("makeup") == "2026-10-18" and se.get("answered") == [r2] and se.get("queue") == [r3], json.dumps(se, ensure_ascii=False)[:200])
+        check("④ 提示先把補做做完", "還沒做完" in page.inner_text("#main"), page.inner_text("#main")[:200])
+        check("④ 沒有 JS 錯誤", not errors, errors)
         ctx.close()
         browser.close()
     print("%d/%d PASS" % (sum(results), len(results)))

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""補做 e2e（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）。數學、國語、社會三站共用同一份（逐字相同）。
+"""補做功能本身的 e2e（2026-10-18 起補做預設關閉，本檔以 localStorage g5.makeupOn=1 打開後測）。
+補做 e2e（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）。數學、國語、社會三站共用同一份（逐字相同）。
 真流程：時鐘固定 10/14 晚上、空白紀錄 → 做完今天的卡 → 日曆下方出現「補做 10/13」→ 補完 → 13 號變補做色、連續 2 天。
 用 python3.12 執行：python3.12 tests/e2e_makeup.py [--base https://windsorya.github.io/<站>/]"""
 import json
@@ -47,6 +48,7 @@ def flow(browser, label, device=None):
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.clock.install(time="2026-10-14T20:00:00+08:00")
+    page.add_init_script("localStorage.setItem('g5.makeupOn','1')")   # 補做預設關閉（2026-10-18 縮範圍）；本檔測的是功能本身
     page.goto(URL, wait_until="domcontentloaded")
     page.wait_for_selector("#main .btn, #main .done")
     txt = page.inner_text("#makeup")

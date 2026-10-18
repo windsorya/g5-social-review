@@ -595,7 +595,10 @@ function wireReview(el){
   el.querySelectorAll("button[data-rvall]").forEach(function(b){b.onclick=function(){startReview(b.dataset.rvall,true);};});
 }
 // 開始一輪：sessionStart 真的存進去才進練習畫面；沒存到就留在原畫面（提示列會出現「再存一次」）
-function beginRound(a){var pv=V();if(pv.makeupPending&&pv.session){if(pv.makeupPending!==myMakeup){renderHome();toast("有一份 "+md(pv.makeupPending)+" 的補做還沒結算：請先按首頁的「結算」。");return {ok:false,error:"MAKEUP_PENDING_OTHER"};}act({type:"makeupClaim",answerDay:pv.session.day,day:pv.makeupPending,ids:pv.session.answered.slice()});}var r=act(a);if(r.ok)startRound();return r;}   // 開新一輪前先結算待結算的補做，免得被新回合蓋掉（Codex 審 g5-sci-review ee9c2f4）
+function beginRound(a){var pv=V();var se0=pv.session;
+  // 還有題目沒答完的補做回合不得被別的回合蓋掉（Codex 審 670a476 B7：小考複習會覆寫它、補做歸屬與已答都不見）
+  if(se0&&se0.makeup&&se0.day===pv.today&&se0.queue.length&&!se0.halted){renderHome();toast(md(se0.makeup)+" 的補做還沒做完：先按「繼續補做」把它做完。");return {ok:false,error:"MAKEUP_IN_PROGRESS"};}
+  if(pv.makeupPending&&pv.session){if(pv.makeupPending!==myMakeup){renderHome();toast("有一份 "+md(pv.makeupPending)+" 的補做還沒結算：請先按首頁的「結算」。");return {ok:false,error:"MAKEUP_PENDING_OTHER"};}act({type:"makeupClaim",answerDay:pv.session.day,day:pv.makeupPending,ids:pv.session.answered.slice()});}var r=act(a);if(r.ok)startRound();return r;}   // 開新一輪前先結算待結算的補做，免得被新回合蓋掉（Codex 審 g5-sci-review ee9c2f4）
 function startRound(){screen="practice";route();window.scrollTo({top:$("#main").offsetTop-8,behavior:"smooth"});}
 function renderConcepts(){
   var v=V();
@@ -615,6 +618,10 @@ function renderConcepts(){
 }
 // 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）：今天的卡做完後，日曆下方列出之前沒練的日子，按了補一份那天的新卡。
 // 補做過的日子在日曆上是淺綠色（核心在那天記 madeUp＝哪天補的）；連續天數照算。
+// 2026-10-18 縮範圍：補做入口預設關閉（迴圈 L20261018061404-4e46e8 4agent 後連 2 輪 Codex FAIL 都落在補做的分頁歸屬；
+// 4agent 4B-20261018-g5r2 預先約定的翻案條件）。沒練到的日子不必補——到期的卡本來就會排進之後每天的計畫。
+// 已在進行／待結算的補做照常可繼續與結算；core 的補做能力不動。重開：localStorage g5.makeupOn＝1（測試也用這個）
+var MAKEUP_ON=(function(){try{return localStorage.getItem("g5.makeupOn")==="1";}catch(e){return false;}})();
 var myMakeup=null;   // 本分頁開始的補做日（只有它由本分頁結算；重新整理後由 session 接手，見 renderHome 的「繼續補做」）
 var MAKEUP_MSG={MAKEUP_TODAY_FIRST:"先把今天的卡做完，才能補做前面的日子。",MAKEUP_DAY:"這一天已經練過了，不用補。",MAKEUP_EMPTY:"現在沒有可以補做的卡：新卡都練過了，其他的卡不是今天練過、就是已經學會。明天再來補。",MAKEUP_ALLDONE:"每一張卡都已經學會了（練過、也在兩個不同的日子答對），沒有卡可以拿來補做。",MAKEUP_STALE:"這一輪是在午夜以前做的，過了午夜就不能記到補做；那一天之後還可以再補。",READONLY:"另一個分頁正在練習，這一頁先只能看。",MAKEUP_NONE:"這一輪的題目沒辦法算到那一天（可能另一個分頁已經用掉，或跨過半夜了）。那一天還是可以再補一次。"};
 function madeUp(s,k){return !!(s.days[k]&&s.days[k].madeUp);}
@@ -631,9 +638,10 @@ function renderCal(){
   if(mkEl){
     var mkOn=v.session&&v.session.makeup&&v.session.queue.length&&!v.session.halted;   // 停下來（halted）的補做走下面的「結算」入口（Codex 審 4d71855）   // 補做做到一半：只給「繼續補做」，不讓別的補做按鈕蓋掉進度
     mkEl.innerHTML=!miss.length?'':mkOn?'<span class="small muted">'+md(v.session.makeup)+' 的補做還沒做完，按上面的「繼續補做」接著做。</span>':v.makeupPending?'<span class="small muted">'+md(v.makeupPending)+' 的補做已經做了 '+v.session.answered.length+' 題，還沒結算：</span><div class="row"><button class="btn ghost sm" type="button" id="goSettle">結算 '+md(v.makeupPending)+' 補做</button></div>':v.remainingIds.length?'<span class="small muted">前面有 '+miss.length+' 天沒練。今天的卡做完後，可以在這裡補做。</span>':
+      !MAKEUP_ON?'<span class="small muted">補做暫停使用：沒練到的日子不用補，到期的卡會自動排進之後每天的練習。</span>':
       '<span class="small muted">補做前面沒練的日子（每天補一份新卡）：</span><div class="row">'+miss.map(function(x){return '<button class="btn ghost sm" type="button" data-mk="'+x+'">補做 '+md(x)+'</button>';}).join("")+'</div>';
     var gs=$("#goSettle"); if(gs) gs.onclick=function(){var v2=V();if(!v2.makeupPending){renderHome();return;}myMakeup=v2.makeupPending;renderEnd();};   // 設計 T06：補做剩下的題沒了也有結算入口；結算照舊由結束畫面送 makeupClaim
-    mkEl.querySelectorAll("button[data-mk]").forEach(function(b){b.onclick=function(){lastReview=null;myMakeup=b.dataset.mk;var r=beginRound({type:"sessionStart",kind:"makeup",day:b.dataset.mk});if(!r.ok&&r.error)toast(MAKEUP_MSG[r.error]||"現在不能補做");};});
+    mkEl.querySelectorAll("button[data-mk]").forEach(function(b){b.onclick=function(){lastReview=null;var prev=myMakeup;myMakeup=b.dataset.mk;var r=beginRound({type:"sessionStart",kind:"makeup",day:b.dataset.mk});if(!r.ok)myMakeup=prev;if(!r.ok&&r.error)toast(MAKEUP_MSG[r.error]||"現在不能補做");};});
   }
   var n=0; k=v.today;
   if(!(s.days[k]&&s.days[k].touched.length)) k=C.addDays(k,-1);
