@@ -137,6 +137,8 @@ def main():
         s["session"] = {"day": TODAY, "kind": "review", "queue": [r2], "answered": [], "wrong": [], "kinds": {}, "makeup": "2026-10-18"}
         ctx, page, errors = open_page(browser, (info["key"], s))
         page.wait_for_timeout(300)
+        mk = page.inner_text("#makeup") if page.locator("#makeup").count() else ""
+        check("⑥ 零作答的補做：日曆下不叫她按不存在的「繼續補做」，說補做暫停使用（Codex 審 3704a12 ②）", "繼續補做" not in mk and "補做暫停使用" in mk, mk[:200])
         page.locator("#goAll").first.click()
         page.wait_for_timeout(300)
         se = json.loads(page.evaluate("localStorage.getItem(window.G5Core.LS_KEY)")).get("session") or {}

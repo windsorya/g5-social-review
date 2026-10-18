@@ -596,9 +596,7 @@ function wireReview(el){
 }
 // 開始一輪：sessionStart 真的存進去才進練習畫面；沒存到就留在原畫面（提示列會出現「再存一次」）
 function beginRound(a){var pv=V();var se0=pv.session;
-  // 還有題目沒答完的補做回合不得被別的回合蓋掉（Codex 審 670a476 B7：小考複習會覆寫它、補做歸屬與已答都不見）
-  if(se0&&se0.makeup&&se0.day===pv.today&&se0.queue.length&&!se0.halted&&se0.answered.length){renderHome();toast(md(se0.makeup)+" 的補做還沒做完：先按「繼續補做」把它做完。");return {ok:false,error:"MAKEUP_IN_PROGRESS"};}
-  if(pv.makeupPending&&pv.session){if(pv.makeupPending!==myMakeup){renderHome();toast("有一份 "+md(pv.makeupPending)+" 的補做還沒結算：請先按首頁的「結算」。");return {ok:false,error:"MAKEUP_PENDING_OTHER"};}act({type:"makeupClaim",answerDay:pv.session.day,day:pv.makeupPending,ids:pv.session.answered.slice()});}var r=act(a);if(r.ok)startRound();return r;}   // 開新一輪前先結算待結算的補做，免得被新回合蓋掉（Codex 審 g5-sci-review ee9c2f4）
+  if(pv.makeupPending&&pv.session){if(pv.makeupPending!==myMakeup){renderHome();toast("有一份 "+md(pv.makeupPending)+" 的補做還沒結算：請先按首頁的「結算」。");return {ok:false,error:"MAKEUP_PENDING_OTHER"};}act({type:"makeupClaim",answerDay:pv.session.day,day:pv.makeupPending,ids:pv.session.answered.slice()});}var r=act(a);if(r.ok)startRound();else if(r.error==="MAKEUP_IN_PROGRESS"){var se1=V().session;renderHome();toast((se1&&se1.makeup?md(se1.makeup)+" 的":"")+"補做還沒做完：先按「繼續補做」把它做完。");}return r;}   // 做到一半的補做由 core 擋（Codex 審 670a476／3704a12 B7）   // 開新一輪前先結算待結算的補做，免得被新回合蓋掉（Codex 審 g5-sci-review ee9c2f4）
 function startRound(){screen="practice";route();window.scrollTo({top:$("#main").offsetTop-8,behavior:"smooth"});}
 function renderConcepts(){
   var v=V();
@@ -636,7 +634,7 @@ function renderCal(){
   $("#cal").innerHTML=cells.join("");
   var miss=C.missedDays(s,START,v.today), mkEl=$("#makeup");
   if(mkEl){
-    var mkOn=v.session&&v.session.makeup&&v.session.queue.length&&!v.session.halted;   // 停下來（halted）的補做走下面的「結算」入口（Codex 審 4d71855）   // 補做做到一半：只給「繼續補做」，不讓別的補做按鈕蓋掉進度
+    var mkOn=C.makeupInProgress({session:v.session},v.today);   // 與 core 擋覆寫、首頁「繼續補做」同一判準（Codex 審 3704a12 ②：零作答時沒有按鈕卻叫她按）   // 停下來（halted）的補做走下面的「結算」入口（Codex 審 4d71855）   // 補做做到一半：只給「繼續補做」，不讓別的補做按鈕蓋掉進度
     mkEl.innerHTML=!miss.length?'':mkOn?'<span class="small muted">'+md(v.session.makeup)+' 的補做還沒做完，按上面的「繼續補做」接著做。</span>':v.makeupPending?'<span class="small muted">'+md(v.makeupPending)+' 的補做已經做了 '+v.session.answered.length+' 題，還沒結算：</span><div class="row"><button class="btn ghost sm" type="button" id="goSettle">結算 '+md(v.makeupPending)+' 補做</button></div>':!MAKEUP_ON?'<span class="small muted">補做暫停使用：沒練到的日子不用補，到期的卡會自動排進之後每天的練習。</span>':
       v.remainingIds.length?'<span class="small muted">前面有 '+miss.length+' 天沒練。今天的卡做完後，可以在這裡補做。</span>':
       '<span class="small muted">補做前面沒練的日子（每天補一份新卡）：</span><div class="row">'+miss.map(function(x){return '<button class="btn ghost sm" type="button" data-mk="'+x+'">補做 '+md(x)+'</button>';}).join("")+'</div>';

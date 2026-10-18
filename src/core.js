@@ -136,6 +136,12 @@
     var old = cards.filter(function (c) { var cs = cardState(state, c.id); return cs.seen > 0 && !retired(cs) && !!cs.due && cs.due <= td && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
     return reviewOrder(state, bank, old).slice(0, n);
   }
+  // 補做進行中（唯一判準；core 的 sessionStart、首頁「繼續補做」、日曆說明共用）：今天的補做回合、還有題、沒停輪、至少答過一題。
+  // 一題都沒答的被取代不會遺失任何作答；停輪的走結算入口。reducer 在 store 補存待存作答之後才判，待存的那題也算（Codex 審 3704a12 B7）
+  function makeupInProgress(state, day) {
+    var se = state && state.session;
+    return !!(se && se.makeup && se.day === day && se.queue.length && !se.halted && se.answered.length);
+  }
   // 可以補做的日子：從 start 到昨天、那天一張都沒練過
   function missedDays(state, start, today0) {
     var out = [], k = start;
@@ -242,6 +248,7 @@
       case "tick": break;
 
       case "sessionStart": {
+        if (makeupInProgress(s, today)) return fail(state0, "MAKEUP_IN_PROGRESS");   // 做到一半的補做不得被任何新回合覆蓋
         if (action.kind === "makeup") {
           var mk = action.day;
           if (!isDay(mk) || mk >= today || (s.days[mk] && s.days[mk].touched.length)) return fail(state0, "MAKEUP_DAY");
@@ -817,7 +824,7 @@
     LS_KEY: LS_KEY, LS_V1: LS_V1, DISSOLVE: DISSOLVE, EXAM: EXAM,
     dayKey: dayKey, isDay: isDay, addDays: addDays, diffDays: diffDays, weekday: weekday,
     validCard: validCard, blankState: blankState, reduce: reduce, view: view, endTitle: endTitle, exitList: exitList,
-    checkState: checkState, decode: decode, migrateV1: migrateV1, createStore: createStore,
+    makeupInProgress: makeupInProgress, checkState: checkState, decode: decode, migrateV1: migrateV1, createStore: createStore,
     cardState: cardState, cardById: cardById, isActive: isActive, poolCards: poolCards, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
     dissolveNew: dissolveNew, dissolveAddSugar: dissolveAddSugar, dissolveAddSalt: dissolveAddSalt,
     dissolveStep: dissolveStep, dissolveRead: dissolveRead, shadowFromSun: shadowFromSun, dirName: dirName
