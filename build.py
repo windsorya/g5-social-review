@@ -12,6 +12,9 @@ ROOT = Path(__file__).resolve().parent
 HEAD = ('<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
         '<meta name="robots" content="noindex,nofollow">'
+        '<link rel="icon" type="image/svg+xml" href="favicon.svg">'
+        '<link rel="apple-touch-icon" href="apple-touch-icon.png">'
+        '<meta name="theme-color" content="#1f5f8b">'
         '<meta name="apple-mobile-web-app-capable" content="yes">'
         '<meta name="apple-mobile-web-app-title" content="社會複習">'
         '</head><body>')

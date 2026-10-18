@@ -246,11 +246,26 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
   .stn .tag{max-width:none}
 }
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+
+/* ===== 荳荳研究所共同頁首（2026-10-18；六站同一份，改這段要六站一起改）：品牌列＋切換列 ===== */
+.brandbar{display:flex;align-items:center;gap:10px;padding-top:16px}
+.brandbar .mark{width:36px;height:36px;flex:none;display:block}
+.brandbar .bname{font-family:var(--f-display);font-size:22px;line-height:1;letter-spacing:.08em;color:var(--ink)}
+#siteNav{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:16px;min-height:44px}
+#siteNav a,#siteNav [aria-current]{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:6px 14px;border-radius:999px;text-decoration:none;white-space:nowrap;border:1.5px solid var(--line);box-sizing:border-box}
+#siteNav a{color:var(--ink);background:var(--card)}
+@media (hover:hover){#siteNav a:hover{border-color:var(--pri);color:var(--pri)}}
+#siteNav [aria-current]{background:var(--pri);border-color:var(--pri);color:var(--on-pri);font-weight:700}
+#siteNav>:nth-child(5){margin-left:14px}   /* 各科四站和錯題／難題兩個工具之間用間距分組（不加元素：切換列測試逐一比對子元素） */
+@media (max-width:600px){#siteNav{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font-size:15px}#siteNav a,#siteNav [aria-current]{padding:6px 4px}#siteNav>:nth-child(5){margin-left:0}}
+/* 探險地圖「現在在這裡／還沒開放」不斷字（2026-10-18） */
+.stn .tag{max-width:none!important;white-space:nowrap;padding:2px 4px!important}   /* 字級不動：自然站 e2e 規定地圖字 ≥15px */
 </style>
 
 <div class="wrap">
   <!-- 五站切換（2026-10-13 律師：「為何沒有回到首頁的按鈕」#1333；國語、社會站 #1351 加入）：自然、數學、難題解說、國語、社會互相點得到 -->
-  <nav id="siteNav" aria-label="切換網站" style="display:flex;flex-wrap:wrap;gap:8px;padding-top:12px;font-size:16px;min-height:44px;align-items:center"><a href="https://windsorya.github.io/g5-sci-review/" style="padding:8px 14px;border-radius:999px;border:2px solid var(--line);color:var(--ink);text-decoration:none;background:var(--card)">五上自然複習</a><a href="https://windsorya.github.io/g5-math-review/" style="padding:8px 14px;border-radius:999px;border:2px solid var(--line);color:var(--ink);text-decoration:none;background:var(--card)">五上數學複習</a><a href="https://windsorya.github.io/g5-chinese-review/" style="padding:8px 14px;border-radius:999px;border:2px solid var(--line);color:var(--ink);text-decoration:none;background:var(--card)">五上國語複習</a><span aria-current="page" style="padding:8px 14px;border-radius:999px;background:var(--pri);color:var(--on-pri);font-weight:700">五上社會複習</span><a href="https://windsorya.github.io/g5-wrong-review/" style="padding:8px 14px;border-radius:999px;border:2px solid var(--line);color:var(--ink);text-decoration:none;background:var(--card)">錯題複習</a><a href="https://windsorya.github.io/g5-help/" style="padding:8px 14px;border-radius:999px;border:2px solid var(--line);color:var(--ink);text-decoration:none;background:var(--card)">難題解說</a></nav>
+  <div class="brandbar"><svg class="mark" viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="31" fill="var(--pri)"/><path d="M32 47V29" stroke="var(--on-pri)" stroke-width="3.5" stroke-linecap="round"/><path d="M31 33C21 33 15 26 15 17c10 0 16 7 16 16z" fill="var(--leaf-soft,#e2efe6)"/><path d="M33 28c9 0 15-6 15-15-9 0-15 6-15 15z" fill="var(--grass,#8fc79a)"/><ellipse cx="32" cy="49" rx="12" ry="5" fill="var(--sunball,#f2b632)"/></svg><span class="bname" translate="no">荳荳研究所</span></div>
+  <nav id="siteNav" aria-label="切換網站"><a href="https://windsorya.github.io/g5-sci-review/">五上自然複習</a><a href="https://windsorya.github.io/g5-math-review/">五上數學複習</a><a href="https://windsorya.github.io/g5-chinese-review/">五上國語複習</a><span aria-current="page">五上社會複習</span><a href="https://windsorya.github.io/g5-wrong-review/">錯題複習</a><a href="https://windsorya.github.io/g5-help/">難題解說</a></nav>
   <header class="hero" id="hero">
     <div class="txt"><h1>五上社會複習</h1><span>第一次定期評量 11/5（四）～11/6（五）<span class="left">・還有 <b id="days">–</b> 天</span></span></div>
     <svg class="sky" id="sky" aria-hidden="true" viewBox="0 0 820 60" style="height:60px"></svg>
