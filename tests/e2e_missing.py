@@ -6,6 +6,8 @@
      提示先結算；回合與作答都留著；按首頁「結算」才記到 10/18
   ③ 補做預設關閉（2026-10-18 縮範圍）：只有說明、沒有補做按鈕
   ④ 關閉前就開始、還沒做完的補做回合：按「開始今天的練習」不得蓋掉它，提示先做完
+  ⑤ 補做關閉、今天還沒做完：說明照樣是「暫停使用」
+  ⑥ 補做開了、一題都還沒答就重新整理：開新回合不被擋（沒有作答可遺失）
   每段都驗沒有 JS 錯誤
 四站同一支（核心 G5Core、存檔 key 讀頁面上的 G5Core.LS_KEY；題號取頁面題庫）。
 執行：python3.12 tests/e2e_missing.py
@@ -117,6 +119,29 @@ def main():
         check("④ 做到一半的補做回合沒被新回合蓋掉", se.get("makeup") == "2026-10-18" and se.get("answered") == [r2] and se.get("queue") == [r3], json.dumps(se, ensure_ascii=False)[:200])
         check("④ 提示先把補做做完", "還沒做完" in page.inner_text("#main"), page.inner_text("#main")[:200])
         check("④ 沒有 JS 錯誤", not errors, errors)
+        ctx.close()
+        # ⑤ 補做關閉、今天還沒做完：說明照樣是「暫停使用」，不說「做完後可以補做」（Codex 審 e2df182 ②）
+        s = json.loads(json.dumps(info["blank"]))
+        s["days"][TODAY] = {"planIds": [r1, r3], "doneIds": [r1], "touched": [r1], "extraDone": False, "labRuns": 0, "teach": 0, "mood": None}
+        s["cards"][r1] = dict(learned); s["log"] = [entry(r1, c1, "x1")]
+        ctx, page, errors = open_page(browser, (info["key"], s))
+        page.wait_for_timeout(300)
+        mk = page.inner_text("#makeup") if page.locator("#makeup").count() else ""
+        check("⑤ 補做關閉、今天沒做完：只說暫停使用", "補做暫停使用" in mk and "可以在這裡補做" not in mk, mk[:200])
+        ctx.close()
+
+        # ⑥ 補做開了、一題都還沒答就重新整理：不得卡死——開新回合要能成功（沒有作答可遺失；Codex 審 e2df182 ③）
+        s = json.loads(json.dumps(info["blank"]))
+        s["days"][TODAY] = {"planIds": [r1, r3], "doneIds": [r1], "touched": [r1], "extraDone": False, "labRuns": 0, "teach": 0, "mood": None}
+        s["cards"][r1] = dict(learned); s["log"] = [entry(r1, c1, "x1")]
+        s["session"] = {"day": TODAY, "kind": "review", "queue": [r2], "answered": [], "wrong": [], "kinds": {}, "makeup": "2026-10-18"}
+        ctx, page, errors = open_page(browser, (info["key"], s))
+        page.wait_for_timeout(300)
+        page.locator("#goAll").first.click()
+        page.wait_for_timeout(300)
+        se = json.loads(page.evaluate("localStorage.getItem(window.G5Core.LS_KEY)")).get("session") or {}
+        check("⑥ 一題都沒答的補做不擋：開得了今天的練習", not se.get("makeup") and "還沒做完" not in page.inner_text("#main"), json.dumps(se, ensure_ascii=False)[:200])
+        check("⑤⑥ 沒有 JS 錯誤", not errors, errors)
         ctx.close()
         browser.close()
     print("%d/%d PASS" % (sum(results), len(results)))
