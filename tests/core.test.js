@@ -1153,7 +1153,19 @@ test("V2 補做進行中，已答和待答的卡都被題庫拿掉：已答照�
   s = run(s, b2, NOON(D), op("tick"));
   assert.deepEqual(s.session.answered, [q[0]], "已答照留");
   assert.deepEqual(s.session.queue, [], "待答的被拿掉");
-  s = run(s, b2, NOON(D), op("makeupClaim", { day: "2026-10-19", ids: s.session.answered.slice() }));
+  // 剩下的題全被拿掉＝當場結算已答的（Codex 審 g5-math-review 9af8526：否則畫面沒有「繼續補做」也不會結算）
   assert.equal(s.days["2026-10-19"].madeUp, D);
   assert.deepEqual(s.days["2026-10-19"].touched, [q[0]]);
+  const again = C.reduce(s, op("makeupClaim", { day: "2026-10-19", ids: [q[0]] }), env(b2, NOON(D)));
+  assert.equal(again.error, "MAKEUP_DAY", "已結算過不再重複結算");
+});
+test("V3 一般補做：最後一題答完、題庫沒變，不會被提前結算（照舊由畫面送結算）", () => {
+  const b1 = bank(["p1", "m1", "m2"]), b0 = bank(["p1"]);
+  let s = run(C.blankState(), b0, NOON(D), op("answer", { cardId: "p1", ok: true }));
+  s = run(s, b1, NOON(D), op("sessionStart", { kind: "makeup", day: "2026-10-19" }));
+  s.session.queue.slice().forEach((id) => { s = run(s, b1, NOON(D), op("answer", { cardId: id, ok: true })); });
+  s = run(s, b1, NOON(D), op("tick"));
+  assert.ok(!s.days["2026-10-19"] || !s.days["2026-10-19"].madeUp, "沒送結算前不得結算");
+  s = run(s, b1, NOON(D), op("makeupClaim", { day: "2026-10-19", ids: s.session.answered.slice() }));
+  assert.equal(s.days["2026-10-19"].madeUp, D);
 });

@@ -755,7 +755,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
    * 律師：「如果數個題目是在測試是否理解同一個觀念，是否有必要出這麼多題目？」「其他科目也請比照」；
    * 判準（律師原話）：「重複是指a題可以答對，也能夠答對b或c題，那b、c題就可能是重複觀念題」。
    * 知識題（記一個事實或定義）一組留 1 題；方法題（考卷會換新例子要她自己判斷）一組留 2 題——同一張卡隔天再出會被背答案。
-   * 只在同一個觀念裡併（觀念頁、地圖站、直接闖關都以觀念為單位）。被併的題原文不刪，只是不出題；要還原就把這裡那一行刪掉。
+   * 只在同一個觀念裡併（觀念頁、地圖站、直接闖關都以觀念為單位）。被併題若有保留題沒考到的錯誤選項（另一個誤解），就不算重複、不併（Codex 審 51496e7）。被併的題原文不刪，只是不出題；要還原就把這裡那一行刪掉。
    * 她已經練過的被併題不影響進度：core 的 pruneVanished 只把還沒做的拿掉。 */
   var MERGED = {
     a06: { keep: ["a02"], why: "a02 答得出「北緯 22～25 度」（選項有南緯）就知道在北半球" },
@@ -765,16 +765,13 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     c12: { keep: ["c01"], why: "「約束大家的行為」是 c01「大家共同遵守的行為標準」換句話說" },
     c07: { keep: ["c03"], why: "c03 知道「違反會被處罰、有強制力的是法律」，沒戴安全帽被罰錢就是法律" },
     c11: { keep: ["c03"], why: "c11 是 c03 反過來問：有強制力的是法律 ⇔ 法律和道德不同在有強制力" },
-    d13: { keep: ["d01"], why: "d01 知道法律由立法院通過，d13 只有正解提到立法院" },
     d05: { keep: ["d04", "d03"], why: "d04（兒童未滿 12 歲）加 d03（18 歲成年）就推得出 13 歲是少年" },
     e08: { keep: ["e06", "e07"], why: "看地名判斷地形（方法題留 e06、e07 兩題）：蘭陽平原名字就寫著平原" },
     e11: { keep: ["e02"], why: "e02 知道臺地是「邊緣陡坡、上面平坦的高地」，就答得出臺地和平原的差別" },
     e12: { keep: ["e01"], why: "e01 知道盆地「中間低平」，就答得出盆地和臺地哪個中間低" },
-    f10: { keep: ["f09"], why: "f09 知道河川短小、坡度大，就知道暴雨時水很快流入大海" },
     g01: { keep: ["g03"], why: "g03 的選項是南／北邊×熱帶／副熱帶四種組合，答對就表示知道「北回歸線以南是熱帶」" },
-    g02: { keep: ["g04"], why: "g04 的選項是南／北邊×熱帶／副熱帶四種組合，答對就表示知道「北回歸線以北是副熱帶」" },
+    g02: { keep: ["g04"], why: "g04 的選項含北邊／南邊與熱帶／副熱帶，答對就表示知道「北回歸線以北是副熱帶」" },
     g06: { keep: ["g07"], why: "g07 的正解就是「越高越冷」" },
-    g11: { keep: ["g07"], why: "高山下雪的原因和 g07 玉山比臺北冷是同一個道理：越高越冷" },
     g09: { keep: ["g08"], why: "g09 是 g08 反過來說：冬天北部和東部多雨 ⇔ 中南部比北部少" }
   };
   var ALL_CARDS = CARDS;
@@ -1451,7 +1448,16 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     // 只拿掉「還沒做」的：今天計畫裡未完成的、這一輪待答的。已做完的是歷史，照留——
     // 2026-10-18 題庫裁重複題後（Codex 審 g5-math-review 3751016）：原本連已完成的也刪，今天的「完成」倒退、補做被鎖，進行中的補做也失去已答紀錄而無法結算
     if (d) d.planIds = d.planIds.filter(function (id) { return ok(id) || d.doneIds.indexOf(id) >= 0; });
-    if (state.session) state.session.queue = state.session.queue.filter(ok);
+    if (state.session) {
+      var se = state.session, before = se.queue.length;
+      se.queue = se.queue.filter(ok);
+      // 補做做到一半、剩下的題剛好全被拿掉：當場把已答的結算到那天（和做完補做一樣）。
+      // 不結算的話畫面沒有「繼續補做」也不會結算，再按補做還會清掉已答（Codex 審 g5-math-review 9af8526）
+      if (se.makeup && before && !se.queue.length && se.answered.length && se.day === day && se.makeup < day && !(state.days[se.makeup] && state.days[se.makeup].touched.length)) {
+        var got = claimable(state, day, se.answered);
+        if (got.length) { var cd = state.days[se.makeup] || (state.days[se.makeup] = blankDay()); cd.planIds = got.slice(); cd.doneIds = got.slice(); cd.touched = got.slice(); cd.madeUp = day; }
+      }
+    }
   }
   // 跨午夜：日期與任務一起切換（矩陣 16、17）
   function syncSession(state, bank, day) {
@@ -2105,6 +2111,7 @@ function $(s){return document.querySelector(s);}
 function esc(t){return String(t).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function md(k){return k?(+k.slice(5,7))+"/"+(+k.slice(8,10)):"";}
 function card(id){return C.cardById(S(),BANK,id);}
+function redoIds(se){return se.wrong.filter(function(id){return !!card(id);});}   // 「再練答錯的」只算題庫裡還在的卡（題庫裁重複題後，答錯過的卡可能已被拿掉；Codex 審 g5-math-review 9af8526）
 function conceptOn(cid){return C.conceptOn(S(),BANK,cid);}
 function srcLine(c){var r=c.src&&MB.SOURCES[c.src];return '<div class="src">'+esc(c.page||SAMPLE)+(r?'・查證：<a href="'+esc(r.url)+'" target="_blank" rel="noopener">'+esc(r.name)+'</a>':'')+"</div>";}
 function on(sel,fn){var el=typeof sel==="string"?$(sel):sel;if(el)el.onclick=fn;}
@@ -2227,8 +2234,8 @@ function renderHome(){
   if(!v.planIds.length){
     h='<div class="done"><b class="t">今天沒有排定卡片</b><p class="muted" style="margin:0">可以點下面的觀念看解說，或「考考爸媽」。</p>'+cont+'<div class="row" style="justify-content:center"><button class="btn ghost" type="button" id="goTeach">考考爸媽</button></div></div>';
   }else if(v.completed){
-    h='<div class="done"><b class="t">今天的卡片都做完了</b><p class="muted" style="margin:0">今天 '+v.M.cardProgress.planned+' 張全部完成。想加碼可以看觀念解說、考考爸媽'+(se&&se.wrong.length?'，或再練答錯的卡':'')+'。</p>'+cont+
-      '<div class="row" style="justify-content:center">'+(se&&se.wrong.length?'<button class="btn ghost" type="button" id="goRedo">再練答錯的 '+se.wrong.length+' 張</button>':'')+'<button class="btn ghost" type="button" id="goTeach">考考爸媽</button></div></div>';
+    h='<div class="done"><b class="t">今天的卡片都做完了</b><p class="muted" style="margin:0">今天 '+v.M.cardProgress.planned+' 張全部完成。想加碼可以看觀念解說、考考爸媽'+(se&&redoIds(se).length?'，或再練答錯的卡':'')+'。</p>'+cont+
+      '<div class="row" style="justify-content:center">'+(se&&redoIds(se).length?'<button class="btn ghost" type="button" id="goRedo">再練答錯的 '+redoIds(se).length+' 張</button>':'')+'<button class="btn ghost" type="button" id="goTeach">考考爸媽</button></div></div>';
   }else{
     var due=v.planIds.filter(function(id){return C.cardState(S(),id).seen>0;}).length, fresh=v.planIds.length-due;
     var parts=[]; if(due) parts.push("到期複習 "+due+" 張"); if(fresh) parts.push("新卡 "+fresh+" 張"); if(v.doneIds.length) parts.push("已做 "+v.doneIds.length+" 張");
@@ -2245,7 +2252,7 @@ function renderHome(){
   on("#goLight",function(){beginRound({type:"sessionStart",size:3});});
   on("#goOn",function(){var se2=V().session;if(se2&&se2.makeup)myMakeup=se2.makeup;startRound();});   // 按「繼續補做」＝本分頁接手這份補做
   on("#goTeach",function(){renderTeach();});
-  on("#goRedo",function(){var se2=V().session;if(!se2){renderHome();return;}beginRound({type:"sessionStart",kind:"redo",ids:se2.wrong.slice()});});   // 存檔被別處清掉後按舊畫面的按鈕：照磁碟現況回首頁，不拋錯（Codex 審 g5-sci-review 4d8b1e0，四站同型）
+  on("#goRedo",function(){var se2=V().session;if(!se2){renderHome();return;}beginRound({type:"sessionStart",kind:"redo",ids:redoIds(se2)});});   // 存檔被別處清掉後按舊畫面的按鈕：照磁碟現況回首頁，不拋錯（Codex 審 g5-sci-review 4d8b1e0，四站同型）
   renderSide();
 }
 // 小考複習：把整個單元（或一個觀念）排成一輪；作答照規則記分、隔天照樣複習，不改今天的計畫
@@ -2599,13 +2606,13 @@ function renderEnd(){
     '<p style="margin:0">這一輪做了 '+se.answered.length+' 張'+(se.answered.length?'，第一次就答對 '+Math.max(0,right)+' 張':'')+'。</p>'+
     (v.completed?'':v.planIds.length?'<p class="muted" style="margin:0">今天的卡片完成 '+v.M.cardProgress.done+' / '+v.M.cardProgress.planned+' 張，還有 '+v.remainingIds.length+' 張，等一下想做再按開始。</p>':'')+
     '<div class="row" style="justify-content:center">'+(!v.completed&&v.remainingIds.length?'<button class="btn" type="button" id="goMore">繼續做剩下的 '+v.remainingIds.length+' 張</button>':'')+
-    (se.wrong.length?'<button class="btn ghost" type="button" id="goRedo">再練答錯的 '+se.wrong.length+' 張</button>':'')+
+    (redoIds(se).length?'<button class="btn ghost" type="button" id="goRedo">再練答錯的 '+redoIds(se).length+' 張</button>':'')+
     '<button class="btn ghost" type="button" id="goTeach">考考爸媽</button><button class="btn ghost" type="button" id="goHome">回首頁</button></div>'+
     segMore(se)+
     '<div style="display:grid;gap:8px;justify-items:center"><span class="small muted">今天練習的感覺？（可以不選）</span><div class="moods" id="moods">'+
     ["good","ok","tired"].map(function(m){return '<button type="button" data-m="'+m+'" aria-label="'+MOOD_NAME[m]+'"'+(v.day.mood===m?' class="on"':'')+'>'+FACES[m]+'</button>';}).join("")+'</div></div></div>';
   on("#goMore",function(){beginRound({type:"sessionStart"});});
-  on("#goRedo",function(){var se2=V().session;if(!se2){renderHome();return;}beginRound({type:"sessionStart",kind:"redo",ids:se2.wrong.slice()});});   // 存檔被別處清掉後按舊畫面的按鈕：照磁碟現況回首頁，不拋錯（Codex 審 g5-sci-review 4d8b1e0，四站同型）
+  on("#goRedo",function(){var se2=V().session;if(!se2){renderHome();return;}beginRound({type:"sessionStart",kind:"redo",ids:redoIds(se2)});});   // 存檔被別處清掉後按舊畫面的按鈕：照磁碟現況回首頁，不拋錯（Codex 審 g5-sci-review 4d8b1e0，四站同型）
   on("#goTeach",function(){renderTeach();});
   on("#goHome",renderHome);
   on("#goSeg",function(){startReview(lastReview,false);});
