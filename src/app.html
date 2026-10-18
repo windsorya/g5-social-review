@@ -452,7 +452,7 @@ function renderMap(){
   var box=$("#mapBox"); if(!box||!MAPX) return;
   var v=V(), t=MAPX.trail({cids:CIDS, stages:v.stages, on:conceptOn});
   // 每站做過幾題：和 stageOf 同一個母體（開放中的觀念的全部卡片，含補題區加的），seen>0＝做過
-  var prog={}; C.poolCards(S(),BANK).forEach(function(c){if(!conceptOn(c.concept))return;var p=prog[c.concept]||(prog[c.concept]={n:0,seen:0});p.n++;if(C.cardState(S(),c.id).seen>0)p.seen++;});
+  var prog={}; C.poolCards(S(),BANK,V().today).forEach(function(c){if(!conceptOn(c.concept))return;var p=prog[c.concept]||(prog[c.concept]={n:0,seen:0});p.n++;if(C.cardState(S(),c.id).seen>0)p.seen++;});
   var key=JSON.stringify([t,prog]);
   // 內容沒變：不重畫；從別的畫面回來（地圖原本收著）時先拿掉動畫 class——display:none 再出現會讓 CSS 動畫重播
   if(key===mapKey&&box.firstChild){if(box.hidden)mapStill(box);showMap(true);return;}
@@ -528,8 +528,8 @@ function renderHome(){
   renderSide();
 }
 // 小考複習：把整個單元（或一個觀念）排成一輪；作答照規則記分、隔天照樣複習，不改今天的計畫
-function unitCards(unit){return C.poolCards(S(),BANK).filter(function(c){return CONCEPTS[c.concept].unit===unit&&conceptOn(c.concept);}).map(function(c){return c.id;});}
-function setCards(unit){return C.poolCards(S(),BANK).filter(function(c){return (c.set==="anqin"||ANQIN_ALSO[c.id])&&CONCEPTS[c.concept].unit===unit&&conceptOn(c.concept);}).map(function(c){return c.id;});}
+function unitCards(unit){return C.poolCards(S(),BANK,V().today).filter(function(c){return CONCEPTS[c.concept].unit===unit&&conceptOn(c.concept);}).map(function(c){return c.id;});}
+function setCards(unit){return C.poolCards(S(),BANK,V().today).filter(function(c){return (c.set==="anqin"||ANQIN_ALSO[c.id])&&CONCEPTS[c.concept].unit===unit&&conceptOn(c.concept);}).map(function(c){return c.id;});}
 // 2026-10-11 律師：「每次複習都要從頭來一遍嗎？」「當天時間夠，想要全部做完，可以嗎？」
 // ⇒ 一段 20 題（排序在 core.js reviewOrder：答錯過的→沒練過的→已經會的），做完可以馬上再練一段；也可以一次做完全部。
 var SEG=20;   // 一段 20 題：每題約 40–60 秒 [推估]，一段約 15–20 分鐘，是五年級一次坐得住的長度；不是總量上限，可以一直接著練
@@ -573,7 +573,7 @@ function wireReview(el){
   el.querySelectorAll("button[data-rvall]").forEach(function(b){b.onclick=function(){startReview(b.dataset.rvall,true);};});
 }
 // 開始一輪：sessionStart 真的存進去才進練習畫面；沒存到就留在原畫面（提示列會出現「再存一次」）
-function beginRound(a){var r=act(a);if(r.ok)startRound();return r;}
+function beginRound(a){var pv=V();if(pv.makeupPending&&pv.session){act({type:"makeupClaim",day:pv.makeupPending,ids:pv.session.answered.slice()});}var r=act(a);if(r.ok)startRound();return r;}   // 開新一輪前先結算待結算的補做，免得被新回合蓋掉（Codex 審 g5-sci-review ee9c2f4）
 function startRound(){screen="practice";route();window.scrollTo({top:$("#main").offsetTop-8,behavior:"smooth"});}
 function renderConcepts(){
   var v=V();
@@ -607,7 +607,7 @@ function renderCal(){
   $("#cal").innerHTML=cells.join("");
   var miss=C.missedDays(s,START,v.today), mkEl=$("#makeup");
   if(mkEl){
-    var mkOn=v.session&&v.session.makeup&&v.session.queue.length&&!v.session.halted;   // 補做做到一半：只給「繼續補做」，不讓別的補做按鈕蓋掉進度
+    var mkOn=v.session&&v.session.makeup&&v.session.queue.length&&!v.session.halted;   // 停下來（halted）的補做走下面的「結算」入口（Codex 審 4d71855）   // 補做做到一半：只給「繼續補做」，不讓別的補做按鈕蓋掉進度
     mkEl.innerHTML=!miss.length?'':mkOn?'<span class="small muted">'+md(v.session.makeup)+' 的補做還沒做完，按上面的「繼續補做」接著做。</span>':v.makeupPending?'<span class="small muted">'+md(v.makeupPending)+' 的補做已經做了 '+v.session.answered.length+' 題，還沒結算：</span><div class="row"><button class="btn ghost sm" type="button" id="goSettle">結算 '+md(v.makeupPending)+' 補做</button></div>':v.remainingIds.length?'<span class="small muted">前面有 '+miss.length+' 天沒練。今天的卡做完後，可以在這裡補做。</span>':
       '<span class="small muted">補做前面沒練的日子（每天補一份新卡）：</span><div class="row">'+miss.map(function(x){return '<button class="btn ghost sm" type="button" data-mk="'+x+'">補做 '+md(x)+'</button>';}).join("")+'</div>';
     var gs=$("#goSettle"); if(gs) gs.onclick=function(){var v2=V();if(!v2.makeupPending){renderHome();return;}myMakeup=v2.makeupPending;renderEnd();};   // 設計 T06：補做剩下的題沒了也有結算入口；結算照舊由結束畫面送 makeupClaim
@@ -621,7 +621,7 @@ function renderCal(){
 function toast(t){var el=$("#main"),d=document.createElement("div");d.className="hint";d.textContent=t;el.prepend(d);setTimeout(function(){d.remove();},3500);}
 
 /* ---------- 觀念頁（概念入口） ---------- */
-function conceptCards(cid){return C.poolCards(S(),BANK).filter(function(c){return c.concept===cid;}).map(function(c){return c.id;});}
+function conceptCards(cid){return C.poolCards(S(),BANK,V().today).filter(function(c){return c.concept===cid;}).map(function(c){return c.id;});}
 function renderConcept(cid){
   screen="concept"; leaveLab();
   var c=CONCEPTS[cid], v=V(), ex=EXPLAIN[cid][0];
@@ -769,7 +769,7 @@ function feedback(p,info){
   var c=p.c, ok=p.ok, shaky=ok&&(p.m.unsure||p.m.hint), box=$("#ansBox");
   if(ok){
     var today=V().today, before=S().log.some(function(e){return e.card===c.id&&!e.ok&&e.d<today;});
-    var msg=shaky?"答對了！你有勾「不太確定」或用了提示，明天再確認一次。":info.graduated?"答對了！這張卡在 3 個不同的日子都答對，畢業了。":info.variation?"答對了！換了題目也會，觀念弄懂了。":before?"答對了！上次卡住的這題，這次你自己答對了。":"答對了！";
+    var msg=shaky?"答對了！你有勾「不太確定」或用了提示，明天再確認一次。":info.graduated?"答對了！隔了幾天又答對，這張卡學會了。":info.variation?"答對了！換了題目也會，觀念弄懂了。":before?"答對了！上次卡住的這題，這次你自己答對了。":"答對了！";
     if(!shaky) chime();
     if(!p.selfGraded) box.insertAdjacentHTML("beforeend",'<div class="fb ok"><strong>'+esc(msg)+'</strong><span>'+esc(c.why||"")+'</span>'+(c.type==="figure"?figureSvg(c.fig,true):"")+srcLine(c)+'</div>');
     else box.insertAdjacentHTML("beforeend",'<div class="fb ok"><strong>'+esc(msg)+'</strong></div>');

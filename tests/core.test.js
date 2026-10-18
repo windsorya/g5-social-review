@@ -32,7 +32,7 @@ function memStorage(init) {
 test("01 同日重複答對不畢業", () => {
   const b = bank(["s1"]); let s = C.blankState();
   for (let i = 0; i < 3; i++) s = run(s, b, NOON(D), op("answer", { cardId: "s1", ok: true }));
-  assert.deepEqual(s.cards.s1, { seen: 3, goodDays: [D], blockedDay: null, due: "2026-10-21" });
+  assert.deepEqual(s.cards.s1, { seen: 3, goodDays: [D], blockedDay: null, due: "2026-10-23" });   // 2026-10-18 排程改「答對後隔 3 天、第 2 次答對學會」（#2696）：只改日期，守的情形不變
   assert.equal(s.cards.s1.goodDays.length, 1);
 });
 
@@ -508,7 +508,7 @@ test("V1 小考複習回合：指定整個單元的題、作答照規則記分�
   const planBefore = s.days[D].planIds.slice();
   s = run(s, b, NOON(D), op("answer", { cardId: "s1", ok: true }));
   assert.deepEqual(s.cards.s1.goodDays, ["2026-10-19", D]);          // 第一次答對照樣算有效日
-  assert.equal(s.cards.s1.due, "2026-10-22");
+  assert.equal(s.cards.s1.due, null);   // 2026-10-18（#2696）：第 2 個答對日就學會，不再排到期日
   assert.deepEqual(s.days[D].planIds, planBefore);
   assert.deepEqual(C.checkState(s, b), []);
   const v = C.view(s, env(b, NOON(D)));
@@ -682,12 +682,14 @@ test("D4 題庫改版後消失的卡：從計畫與回合剔除，不假完成�
   const b = bank(["s1"]); let s = C.blankState();
   s.days[D] = { planIds: ["gone", "s1"], doneIds: [], touched: [], extraDone: false, labRuns: 0, teach: 0, mood: null };
   s.session = { day: D, kind: "plan", queue: ["gone", "s1"], answered: [], wrong: [], kinds: {} };
+  // 2026-10-18 改（Codex 設計者 T23 vs 本條 D4 的折衷）：計畫存檔不刪查不到的題（保留引用、列為 missingIds），回合待答照舊拿掉；
+  //   畫面的「還要做」與「完成」只看查得到的題，所以不會留下永遠做不完的計畫（本條原意）
   let v = C.view(s, env(b, NOON(D)));
-  assert.deepEqual([v.planIds, v.session.queue], [["s1"], ["s1"]]);
+  assert.deepEqual([v.planIds, v.session.queue, v.remainingIds, v.missingIds], [["gone", "s1"], ["s1"], ["s1"], ["gone"]]);
   s = run(s, b, NOON(D), op("answer", { cardId: "s1", ok: true }));
-  assert.deepEqual([s.days[D].planIds, s.session.queue], [["s1"], []]);   // 存檔本身也剔除，不只畫面
+  assert.deepEqual([s.days[D].planIds, s.session.queue], [["gone", "s1"], []]);
   v = C.view(s, env(b, NOON(D)));
-  assert.deepEqual([v.remainingIds, v.completed], [[], true]);
+  assert.deepEqual([v.remainingIds, v.completed, v.missingIds], [[], true, ["gone"]]);
 });
 
 test("D10 schema：實驗任務 tasksDone 重複要拒絕", () => {
@@ -787,11 +789,11 @@ function dayRec(plan, done, touched) { return { planIds: plan, doneIds: done, to
 
 // 2026-10-18 改期望（Codex 審 g5-math-review 3751016）：已做完的消失卡是歷史，計畫與已完成兩邊一起留（不變量 done⊂plan 照樣成立、突變 N3 照樣抓到）；
 //   原本兩邊一起剔掉，題庫裁題當天「今天已完成」會倒退、補做被鎖。還沒做的消失卡照舊從計畫拿掉。
-test("R4 D4-b 消失卡：已做完的在計畫與已完成兩邊一起留、沒做的從計畫拿掉（殺突變 N3）：進度 1/2", () => {
+test("R4 D4-b 消失卡：計畫存檔一律不刪；還要做只算查得到的、查不到又沒做的列為 missingIds（殺突變 N3）", () => {
   const b = bank(["s1", "s2"]); const s = C.blankState();
   s.days[D] = dayRec(["gone", "gone2", "s1"], ["gone"]);
   const v = C.view(s, env(b, NOON(D)));
-  assert.deepEqual([v.planIds, v.doneIds, v.M.cardProgress], [["gone", "s1"], ["gone"], { done: 1, planned: 2 }]);
+  assert.deepEqual([v.planIds, v.doneIds, v.remainingIds, v.missingIds], [["gone", "gone2", "s1"], ["gone"], ["s1"], ["gone2"]]);
   assert.ok(v.doneIds.every((id) => v.planIds.includes(id)), "已完成⊂計畫");
   assert.equal(v.completed, false);
   assert.deepEqual(s.days[D].doneIds, ["gone"], "view 不得改到輸入");
@@ -953,7 +955,7 @@ test("T01 正常補做：今天做完 → 開補做（review 回合＋makeup）�
   assert.deepEqual(s.days[MK].touched.slice().sort(), ids.slice().sort());
   assert.deepEqual(s.days[MK].doneIds.slice().sort(), ids.slice().sort());
   assert.equal(s.days[MK].madeUp, D);
-  assert.deepEqual(s.cards[ids[0]].goodDays, [D]); assert.equal(s.cards[ids[0]].due, "2026-10-21");
+  assert.deepEqual(s.cards[ids[0]].goodDays, [D]); assert.equal(s.cards[ids[0]].due, "2026-10-23");   // #2696 隔 3 天
   assert.deepEqual(C.missedDays(s, "2026-10-17", D), ["2026-10-17", "2026-10-19"]);
   assert.deepEqual(C.checkState(s, B12), []);
 });
@@ -1091,12 +1093,13 @@ test("T14 補做排卡：新卡（不含今天計畫、今天碰過的）；新�
   assert.equal(C.reduce(doneToday(b5), op("sessionStart", { kind: "makeup", day: MK }), env(b5, NOON(D))).error, "MAKEUP_EMPTY");
   const b8 = bank(["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"]);
   let s = doneToday(b8);
-  ["2026-10-21", "2026-10-22"].forEach((d) => { s = run(s, b8, NOON(d), op("tick")); s.days[d].planIds.forEach((id) => { s = run(s, b8, NOON(d), op("answer", { cardId: id, ok: true })); }); });
-  assert.deepEqual(s.days["2026-10-22"].planIds, ["a6", "a7", "a8"]);
-  s = run(s, b8, NOON("2026-10-22"), op("sessionStart", { kind: "makeup", day: MK }));
-  assert.deepEqual(s.session.queue.slice().sort(), ["a1", "a2", "a3", "a4", "a5"]);
-  s = finishRound(s, b8, "2026-10-22");
-  assert.equal(C.reduce(s, op("sessionStart", { kind: "makeup", day: "2026-10-17" }), env(b8, NOON("2026-10-22"))).error, "MAKEUP_EMPTY", "今天練過的卡不再排");
+  // 2026-10-18（#2696）排程改隔 3 天：a1–a5 10/23 到期並學會，a6–a8 當天第一次練；10/24 補做只剩練過沒學會、今天沒碰過的 a6–a8
+  s = run(s, b8, NOON("2026-10-23"), op("tick")); s.days["2026-10-23"].planIds.forEach((id) => { s = run(s, b8, NOON("2026-10-23"), op("answer", { cardId: id, ok: true })); });
+  assert.deepEqual(s.days["2026-10-23"].planIds, ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"]);
+  s = run(s, b8, NOON("2026-10-24"), op("sessionStart", { kind: "makeup", day: MK }));
+  assert.deepEqual(s.session.queue.slice().sort(), ["a6", "a7", "a8"], "新卡用完 → 排練過沒學會的");
+  s.session.queue.slice().forEach((id) => { s = run(s, b8, NOON("2026-10-24"), op("answer", { cardId: id, ok: false })); });   // 答錯＝還沒學會（答對的話第 2 天就學會，測不到這條）
+  assert.equal(C.reduce(s, op("sessionStart", { kind: "makeup", day: "2026-10-17" }), env(b8, NOON("2026-10-24"))).error, "MAKEUP_EMPTY", "今天練過的卡不再排");
 });
 
 test("T15 補做回合答錯照一般規則：進「再練答錯的」、換一題確認都可；作答與加碼都記今天", () => {
@@ -1211,7 +1214,7 @@ test("T06 補做剩下的題在目錄裡真的查不到：不自動結算；首�
 test("T08／T09 新卡只從 active 挑；練過、沒畢業、到期的舊題照常排進複習", () => {
   const full = bank(["x", "k1", "k2"]), cut = abank(["x", "k1", "k2", "y"], ["k1", "k2"]);
   let s = run(C.blankState(), full, NOON("2026-10-19"), op("answer", { cardId: "x", ok: true }));
-  const plan = C.view(s, env(cut, NOON(D))).planIds;
+  const plan = C.view(s, env(cut, NOON("2026-10-22"))).planIds;   // 10/19 答對 ⇒ 隔 3 天 10/22 到期（#2696）
   assert.ok(plan.includes("x"), "到期的舊題 x 照排");
   assert.ok(!plan.includes("y"), "沒練過、非 active 的 y 不排成新卡");
   assert.ok(plan.includes("k1") && plan.includes("k2"));
@@ -1236,4 +1239,50 @@ test("T19 合併表刪一行（x 重新變成 active）：今天的計畫不變�
   s = run(s, back, NOON(D), op("tick"));
   assert.deepEqual(s.days[D].planIds, ["k"], "今天不重開");
   assert.ok(C.view(s, env(back, NOON("2026-10-21"))).planIds.includes("x"), "明天可出 x");
+});
+
+// ===== 2026-10-18 設計試做第 2 輪（Codex 審 4d71855 判 FAIL 的項目）＋排程改「隔 3 天、第 2 次答對學會」（#2696）=====
+test("R2a 家長匯入的題（不在內建目錄）可以排成新卡、算進母體", () => {
+  const cut = abank(["k", "x"], ["k"]);
+  let s = run(C.blankState(), cut, NOON("2026-10-19"), op("import", { cards: [card("custom")] }));
+  assert.ok(C.poolCards(s, cut, D).some((c) => c.id === "custom"), "母體有匯入題");
+  assert.ok(C.view(s, env(cut, NOON(D))).planIds.includes("custom"), "隔天計畫排得到匯入題");
+});
+test("R2b 母體只看今天的計畫：昨天沒答的停止出新題不混進今天", () => {
+  const full = bank(["x", "k"]), cut = abank(["x", "k"], ["k"]);
+  let s = run(C.blankState(), full, NOON("2026-10-19"), op("tick"));
+  assert.ok(s.days["2026-10-19"].planIds.includes("x"));
+  assert.deepEqual(C.poolCards(s, cut, D).map((c) => c.id), ["k"], "今天的母體不含昨天沒答的 x");
+  assert.deepEqual(C.poolCards(s, cut, "2026-10-19").map((c) => c.id).sort(), ["k", "x"], "昨天當天仍算");
+});
+test("R2c 新題候選都學會、只剩停止出新的題沒練過：補做回「全部學會」，不說明天再來", () => {
+  const cut = abank(["k", "x"], ["k"]); let s = C.blankState();
+  s.cards.k = learned(2, ["2026-10-15", "2026-10-18"], null);
+  s.days[D] = { planIds: [], doneIds: [], touched: [], extraDone: false, labRuns: 0, teach: 0, mood: null };
+  assert.equal(C.reduce(s, op("sessionStart", { kind: "makeup", day: "2026-10-19" }), env(cut, NOON(D))).error, "MAKEUP_ALLDONE");
+});
+test("R2d 補做中途停下來（halted）還有剩題：首頁仍有結算入口", () => {
+  const b0 = bank(["p1"]), full = bank(["p1", "m1", "m2", "m3"]);
+  let s = run(C.blankState(), b0, NOON(D), op("answer", { cardId: "p1", ok: true }));
+  s = run(s, full, NOON(D), op("sessionStart", { kind: "makeup", day: "2026-10-19" }));
+  s = run(s, full, NOON(D), op("answer", { cardId: s.session.queue[0], ok: true }));
+  s.session.halted = true;
+  assert.equal(C.view(s, env(full, NOON(D))).makeupPending, "2026-10-19");
+});
+test("R2f 作答紀錄截斷：當天 touched 有的卡照樣可以結算補做", () => {
+  const b0 = bank(["p1"]), full = bank(["p1", "m1"]);
+  let s = run(C.blankState(), b0, NOON(D), op("answer", { cardId: "p1", ok: true }));
+  s = run(s, full, NOON(D), op("sessionStart", { kind: "makeup", day: "2026-10-19" }));
+  s = run(s, full, NOON(D), op("answer", { cardId: "m1", ok: true }));
+  s.log = s.log.filter((e) => e.card !== "m1");   // 模擬紀錄被截斷
+  s = run(s, full, NOON(D), op("makeupClaim", { day: "2026-10-19", ids: ["m1"] }));
+  assert.deepEqual(s.days["2026-10-19"].touched, ["m1"]);
+});
+test("S1 排程（#2696）：答對後隔 3 天到期；隔天再答對不算新的一天以外的提早學會；第 2 個答對日就學會", () => {
+  const b = bank(["s1"]);
+  let s = run(C.blankState(), b, NOON(D), op("answer", { cardId: "s1", ok: true }));
+  assert.deepEqual([s.cards.s1.goodDays, s.cards.s1.due], [[D], "2026-10-23"]);
+  s = run(s, b, NOON("2026-10-23"), op("answer", { cardId: "s1", ok: true }));
+  assert.deepEqual([s.cards.s1.goodDays, s.cards.s1.due], [[D, "2026-10-23"], null], "第 2 個答對日學會");
+  assert.ok(!C.view(s, env(b, NOON("2026-10-26"))).planIds.includes("s1"), "學會後不再排");
 });

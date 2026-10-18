@@ -75,16 +75,21 @@
   }
   // 2026-10-18 設計（Codex 設計者 L20261018061404-4e46e8 推薦方案③）：題庫＝完整目錄（查得到題）＋ bank.active（能不能排成新卡）。
   // 停止出新的題不刪：她練過的照常複習到畢業；計畫、回合、補做都查得回原題；不搬成績、不複製有效日給保留題。
-  function isActive(bank, id) { return !bank.active || !!bank.active[id]; }
+  // 不在內建目錄裡的卡（家長匯入的題）一律可排成新卡（Codex 審 4d71855：原寫法把合法匯入題排除在計畫與進度外）
+  function isActive(bank, id) { return !bank.active || !!bank.active[id] || !bank.cards.some(function (c) { return c.id === id; }); }
   // 觀念進度、單元／觀念題數、直接闖關、小考複習的母體＝能出新卡的 ∪ 練過的 ∪ 最近一天計畫或回合裡還在用的。單純裁題不會讓「做過幾題」或植物階段倒退
-  function poolCards(state, bank) {
-    var ref = {}, last = Object.keys(state.days).sort().pop();
-    if (last) state.days[last].planIds.forEach(function (id) { ref[id] = 1; });
+  // day＝今天（Codex 審 4d71855：原取「最後一天」，昨天沒答的舊題會混進今天的母體，和階段不一致）
+  function poolCards(state, bank, day) {
+    var ref = {};
+    if (day && state.days[day]) state.days[day].planIds.forEach(function (id) { ref[id] = 1; });
     if (state.session) state.session.queue.concat(state.session.answered).forEach(function (id) { ref[id] = 1; });
     return enabledCards(state, bank).filter(function (c) { return isActive(bank, c.id) || cardState(state, c.id).seen > 0 || ref[c.id]; });
   }
   function cardState(state, id) { return state.cards[id] || { seen: 0, goodDays: [], blockedDay: null, due: null }; }
-  function retired(cs) { return cs.goodDays.length >= 3; }
+  // 2026-10-18 律師問「以學習成效、孩子能夠負擔及吸收數量，題目數量合理嗎」：改「答對後隔 3 天再考，第 2 次答對就學會」。
+  // 同一套排程模擬（~/scripts/state/autocont/g5-four-load-sim2-20261018.js）：四站每天 108→62 題（答對 8 成）、174→95（6 成），考前練過 544/580 不變，學會 481（原規則滿 3 天 472）。改回原規則＝門檻 3、due 1 天／2 天
+  var GRAD_DAYS = 2, FIRST_GAP = 3;
+  function retired(cs) { return cs.goodDays.length >= GRAD_DAYS; }
 
   /* ---------- 空白狀態 ---------- */
   function blankState() {
@@ -137,6 +142,7 @@
   function claimable(state, td, ids) {
     var hit = {}, used = {}, plan = (state.days[td] && state.days[td].planIds) || [];
     state.log.forEach(function (e) { if (e.d === td) hit[e.card] = 1; });
+    if (state.days[td]) state.days[td].touched.forEach(function (id) { hit[id] = 1; });   // 作答紀錄會截斷，當天練過的卡也記在 touched（Codex 審 4d71855 T21）
     Object.keys(state.days).forEach(function (k) { var d = state.days[k]; if (d.madeUp === td) d.touched.forEach(function (id) { used[id] = 1; }); });
     return uniq(ids.filter(function (id) { return isStr(id) && hit[id] && plan.indexOf(id) < 0 && !used[id]; }));
   }
@@ -149,6 +155,10 @@
     return !!d && d.planIds.length > 0 && d.planIds.every(function (id) { return d.doneIds.indexOf(id) >= 0; });
   }
   function remainingOf(d) { return d.planIds.filter(function (id) { return d.doneIds.indexOf(id) < 0; }); }
+  // 計畫一律不刪（Codex 設計者 T23）；但目錄裡真的查不到的題做不了，畫面上的「還要做」與「完成」只看查得到的（舊 D4：不留永遠做不完的計畫）。查不到的列為 missingIds（資料缺口）
+  function liveRemaining(s, bank, d) { return remainingOf(d).filter(function (id) { return !!cardById(s, bank, id); }); }
+  // 完成＝有計畫、查得到的都做完，而且計畫不是只剩「查不到又沒做」的題（做完後才從目錄消失的照樣算完成）
+  function completedIn(s, bank, d) { return !!d && d.planIds.some(function (id) { return d.doneIds.indexOf(id) >= 0 || !!cardById(s, bank, id); }) && !liveRemaining(s, bank, d).length; }
 
   // 三單元交錯期：同一份計畫，改成輪流出不同概念（不隨機，重載後順序不變）
   function sessionOrder(state, bank, day, ids) {
@@ -195,7 +205,7 @@
     var ok = function (id) { return !!cardById(state, bank, id); }, d = state.days[day];
     // 只拿掉「還沒做」的：今天計畫裡未完成的、這一輪待答的。已做完的是歷史，照留——
     // 2026-10-18 題庫裁重複題後（Codex 審 g5-math-review 3751016）：原本連已完成的也刪，今天的「完成」倒退、補做被鎖，進行中的補做也失去已答紀錄而無法結算
-    if (d) d.planIds = d.planIds.filter(function (id) { return ok(id) || d.doneIds.indexOf(id) >= 0; });
+    // 今天的計畫一律不刪：目錄裡真的查不到的題照留，今天如實顯示沒做完（Codex 審 4d71855 T23：刪掉會變成沒做也算完成）
     if (state.session) state.session.queue = state.session.queue.filter(ok);   // 只有完整目錄裡真的查不到的卡才拿掉（停止出新的題仍查得到，不會走到這裡）；補做一律由畫面明確送 makeupClaim 結算
   }
   // 跨午夜：日期與任務一起切換（矩陣 16、17）
@@ -221,7 +231,7 @@
     var day = ensureDay(s, bank, today);
     syncSession(s, bank, today);
     pruneVanished(s, bank, today);
-    var wasDone = dayCompleted(day);
+    var wasDone = completedIn(s, bank, day);
     function extra() { if (wasDone) day.extraDone = true; }   // 只有計畫先完成，之後實際完成的才算加碼（矩陣 9、10、12）
 
     switch (action.type) {
@@ -231,11 +241,11 @@
         if (action.kind === "makeup") {
           var mk = action.day;
           if (!isDay(mk) || mk >= today || (s.days[mk] && s.days[mk].touched.length)) return fail(state0, "MAKEUP_DAY");
-          if (!dayCompleted(day) && remainingOf(day).length) return fail(state0, "MAKEUP_TODAY_FIRST");   // 只有今天還有沒做完的卡才擋；空計畫（沒有任務）不是完成，但也不擋補做
+          if (liveRemaining(s, bank, day).length) return fail(state0, "MAKEUP_TODAY_FIRST");   // 只有今天還有沒做完的卡才擋；空計畫（沒有任務）不是完成，但也不擋補做
           var mq = makeupCards(s, bank, day, today, mk);
           if (!mq.length) {
             // 全部卡都畢業了＝以後也排不出補做卡；其餘（今天都練過）明天就有（Grok 審 1b0aebe：原本一律說「明天再來補」）
-            var anyLeft = enabledCards(s, bank).some(function (c) { return !retired(cardState(s, c.id)); });
+            var anyLeft = enabledCards(s, bank).some(function (c) { var cs = cardState(s, c.id); return cs.seen > 0 ? !retired(cs) : isActive(bank, c.id); });   // 只算補做排得到的：練過沒畢業的、沒練過的新題候選（Codex 審 4d71855）
             return fail(state0, anyLeft ? "MAKEUP_EMPTY" : "MAKEUP_ALLDONE");
           }
           s.session = { day: today, kind: "review", queue: stuckLast(s, bank, sessionOrder(s, bank, today, mq)), answered: [], wrong: [], kinds: {}, makeup: mk };
@@ -279,7 +289,7 @@
         } else if (first && !variation && cs.blockedDay !== today && cs.goodDays.indexOf(today) < 0) {
           cs.goodDays.push(today);
           var n = cs.goodDays.length;
-          cs.due = n === 1 ? addDays(today, 1) : n === 2 ? addDays(today, 2) : null;
+          cs.due = n >= GRAD_DAYS ? null : addDays(today, FIRST_GAP);
           info.graduated = n >= 3;
         } else if (cs.due === null && cs.goodDays.length === 0) {
           cs.due = addDays(today, 1);   // 第一次見到就是變式或重答：至少明天要回來
@@ -495,21 +505,21 @@
       if (e.due <= today) exitPending++; else exitLater++;
     });
     var stages = {};
-    Object.keys(bank.concepts).forEach(function (cid) { stages[cid] = stageOf(s, bank, cid); });
+    Object.keys(bank.concepts).forEach(function (cid) { stages[cid] = stageOf(s, bank, cid, today); });
     return {
-      today: today, planIds: d.planIds.slice(), doneIds: d.doneIds.slice(), remainingIds: remainingOf(d),
+      today: today, planIds: d.planIds.slice(), doneIds: d.doneIds.slice(), remainingIds: liveRemaining(s, bank, d), missingIds: d.planIds.filter(function (id) { return d.doneIds.indexOf(id) < 0 && !cardById(s, bank, id); }),
       // 補做已答、剩下的題沒了、那天還沒結算 ⇒ 首頁給「結算」入口（設計 T06）
-      makeupPending: (s.session && s.session.makeup && s.session.day === today && !s.session.queue.length && s.session.answered.length &&
+      makeupPending: (s.session && s.session.makeup && s.session.day === today && (!s.session.queue.length || s.session.halted) && s.session.answered.length &&
         !(s.days[s.session.makeup] && s.days[s.session.makeup].touched.length)) ? s.session.makeup : null,
-      completed: dayCompleted(d), session: s.session, stages: stages, day: d,
+      completed: completedIn(s, bank, d), session: s.session, stages: stages, day: d,
       M: { cardProgress: { done: d.doneIds.length, planned: d.planIds.length }, exitPending: exitPending, extraDone: d.extraDone },
       exitLater: exitLater,
       needsHelp: Object.keys(s.help).filter(function (cid) { return s.help[cid].needsHelp && bank.concepts[cid] && conceptOn(s, bank, cid); })
     };
   }
   // 植物階段完全由狀態派生（矩陣 26）：0 種子＝沒見過；1 發芽＝見過部分；2 長葉＝全部見過；3 開花＝出口題通過；4 結果＝出口通過且全部畢業
-  function stageOf(s, bank, cid) {
-    var cards = poolCards(s, bank).filter(function (c) { return c.concept === cid; });
+  function stageOf(s, bank, cid, day) {
+    var cards = poolCards(s, bank, day).filter(function (c) { return c.concept === cid; });
     if (!cards.length) return 0;
     var seen = cards.filter(function (c) { return cardState(s, c.id).seen > 0; }).length;
     var e = s.exits[cid], pass = !!e && e.status === "pass";
