@@ -1368,7 +1368,8 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
   function poolCards(state, bank, day) {
     var ref = {};
     if (day && state.days[day]) state.days[day].planIds.forEach(function (id) { ref[id] = 1; });
-    if (state.session) state.session.queue.concat(state.session.answered).forEach(function (id) { ref[id] = 1; });
+    // 回合只在它就是 day 那天的才算（Codex 審 8364a83 R2b：昨天沒答完的回合帶著停止出新的題，混進今天的母體）
+    if (state.session && (!day || state.session.day === day)) state.session.queue.concat(state.session.answered).forEach(function (id) { ref[id] = 1; });
     return enabledCards(state, bank).filter(function (c) { return isActive(bank, c.id) || cardState(state, c.id).seen > 0 || ref[c.id]; });
   }
   function cardState(state, id) { return state.cards[id] || { seen: 0, goodDays: [], blockedDay: null, due: null }; }
@@ -1379,7 +1380,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
 
   /* ---------- 空白狀態 ---------- */
   function blankState() {
-    return { v: 3, cards: {}, exits: {}, days: {}, labRuns: {}, session: null, log: [], ops: [],
+    return { v: 4, cards: {}, exits: {}, days: {}, labRuns: {}, session: null, log: [], ops: [],
              help: {}, extra: [], settings: { unit3: false, sound: true, tone: 0 } };
   }
   function blankDay() { return { planIds: [], doneIds: [], touched: [], extraDone: false, labRuns: 0, teach: 0, mood: null }; }
@@ -1413,9 +1414,12 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
   function makeupCards(state, bank, today0, td, mk) {
     var cards = enabledCards(state, bank), n = newQuota(mk), hit = {};
     state.log.forEach(function (e) { if (e.d === td) hit[e.card] = 1; });
+    today0.touched.forEach(function (id) { hit[id] = 1; });   // 作答紀錄會截斷：當天練過的也記在 touched（Codex 審 8364a83：截斷後補做又排出已用過的卡）
+    Object.keys(state.days).forEach(function (k) { if (state.days[k].madeUp === td) state.days[k].touched.forEach(function (id) { hit[id] = 1; }); });
     var fresh = cards.filter(function (c) { return cardState(state, c.id).seen === 0 && isActive(bank, c.id) && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
     if (fresh.length) return fresh.slice(0, n);
-    var old = cards.filter(function (c) { var cs = cardState(state, c.id); return cs.seen > 0 && !retired(cs) && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
+    // 練過的只出已到期的（Codex 審 4d061e3：補做不看到期日 ⇒ 答對隔天就能補做再答對、提早學會，繞過「隔 3 天」）
+    var old = cards.filter(function (c) { var cs = cardState(state, c.id); return cs.seen > 0 && !retired(cs) && !!cs.due && cs.due <= td && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
     return reviewOrder(state, bank, old).slice(0, n);
   }
   // 可以補做的日子：從 start 到昨天、那天一張都沒練過
@@ -1576,7 +1580,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
           cs.goodDays.push(today);
           var n = cs.goodDays.length;
           cs.due = n >= GRAD_DAYS ? null : addDays(today, FIRST_GAP);
-          info.graduated = n >= 3;
+          info.graduated = n >= GRAD_DAYS;   // 跟排程同一個門檻（Codex 審 8364a83：排程改 2 天、回饋還寫死 3）
         } else if (cs.due === null && cs.goodDays.length === 0) {
           cs.due = addDays(today, 1);   // 第一次見到就是變式或重答：至少明天要回來
         }
@@ -1610,6 +1614,9 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
       case "makeupClaim": {
         var ck = action.day;
         if (!isDay(ck) || ck >= today || (s.days[ck] && s.days[ck].touched.length)) return fail(state0, "MAKEUP_DAY");
+        // 結算請求綁「這些題是哪一天答的」（設計報告 (C)5；Codex 審 8364a83 T16）：送出時那一天已過＝拒領，
+        // 不拿重試當下的今天去認領——昨天答的不冒算成今天，目標日保持可補
+        if (action.answerDay !== today) return fail(state0, "MAKEUP_STALE");
         var got = claimable(s, today, Array.isArray(action.ids) ? action.ids : []);
         if (!got.length) return fail(state0, "MAKEUP_NONE");
         var cd = s.days[ck] || (s.days[ck] = blankDay());   // 那天原本的實驗、考考爸媽、心情紀錄照留
@@ -1798,6 +1805,9 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
       makeupPending: (s.session && s.session.makeup && s.session.day === today && (!s.session.queue.length || s.session.halted) && s.session.answered.length &&
         !(s.days[s.session.makeup] && s.days[s.session.makeup].touched.length)) ? s.session.makeup : null,
       completed: completedIn(s, bank, d), session: s.session, stages: stages, day: d,
+      // 首頁只照這個挑文字（Codex 審 8364a83 T23：計畫裡有題目已不在題庫時，原本照樣說「N 張全部完成」）
+      planStatus: !d.planIds.length ? "empty" : !completedIn(s, bank, d) ? "open" :
+        d.planIds.some(function (id) { return d.doneIds.indexOf(id) < 0 && !cardById(s, bank, id); }) ? "complete_missing" : "complete",
       M: { cardProgress: { done: d.doneIds.length, planned: d.planIds.length }, exitPending: exitPending, extraDone: d.extraDone },
       exitLater: exitLater,
       needsHelp: Object.keys(s.help).filter(function (cid) { return s.help[cid].needsHelp && bank.concepts[cid] && conceptOn(s, bank, cid); })
@@ -1835,7 +1845,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
   function checkState(o, bank) {
     var errs = [];
     function bad(m) { errs.push(m); }
-    if (!isObj(o) || o.v !== 3) { bad("v"); return errs; }
+    if (!isObj(o) || o.v !== 4) { bad("v"); return errs; }
     if (!isObj(o.cards)) bad("cards"); else Object.keys(o.cards).forEach(function (k) {
       var c = o.cards[k];
       if (!isObj(c) || !isNat(c.seen) || !dayList(c.goodDays) || c.goodDays.length > 3 ||
@@ -1893,6 +1903,9 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
   function decode(text, bank) {
     var o;
     try { o = JSON.parse(text); } catch (e) { return { accepted: false, error: "SCHEMA", detail: ["json"] }; }
+    // v4（2026-10-18，Codex 審 8364a83 T17）：資料形狀與 v3 相同，只換版本號——v3 讀進來當 v4，之後一律寫 v4；
+    // 還開著的舊頁（只認 v3）寫入前會先讀磁碟，讀到 v4 就拒讀不寫，不會把新版計畫剪回舊規則
+    if (isObj(o) && o.v === 3) o.v = 4;
     var errs = checkState(o, bank);
     return errs.length ? { accepted: false, error: "SCHEMA", detail: errs } : { accepted: true, state: o };
   }
@@ -1933,6 +1946,10 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
   /* ---------- 儲存層：寫入成功才公布（矩陣 27） ---------- */
   function createStore(opt) {
     var storage = opt.storage, bank = opt.bank, clock = opt.clock;
+    // 單一寫入分頁（同錯題站 g5wrong.v1:writer；Codex 審 8364a83 T15／T18）：opt.lock.held() 為假＝這一頁唯讀，
+    // 任何操作都不讀不寫、回 READONLY。app 一律接上 navigator.locks；不帶 lock 只給單頁測試用
+    var lock = opt.lock || null;
+    function readonly() { return !!lock && !lock.held(); }
     // loadError：SCHEMA（存檔讀得到但不合法）／READ（讀不到）／MIGRATE（舊資料搬不進去）——三種都封鎖寫入，絕不拿空白蓋掉看不到的資料
     // migrateReason（只在 loadError=MIGRATE 時有值）：PARSE 解析失敗／VERSION 版本不支援／BAD_V1 結構不合法／WRITE 寫不進去
     var st = { state: blankState(), saveStatus: "ok", pendingAction: null, loadError: null, migrateReason: null, syncMode: "local", migrated: false };
@@ -1991,6 +2008,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
       return true;
     }
     function dispatch(action) {
+      if (readonly()) return { ok: false, error: "READONLY", state: st.state };
       // 先處理既有的待存操作（它自己會先讀磁碟）；補不進去就照舊回 SAVE_PENDING，畫面才會保留原本那筆
       // （Codex 審 2e70601：上一版先 refresh、失敗就回 SAVE_FAILED，畫面把待存換成新的那筆，恢復後重試只存舊的）。
       if (st.pendingAction && !(action && action.id && action.id === st.pendingAction.id)) {
@@ -2021,16 +2039,17 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
       return { ok: true, info: r.info, state: st.state };
     }
     function retry() { return st.pendingAction ? dispatch(st.pendingAction) : { ok: true, nothing: true, state: st.state }; }
+    function reload() { if (!st.loadError) refresh(); return st; }   // 唯讀頁拿到寫入權時先換成磁碟最新版
     function accepted(id) { return st.state.ops.indexOf(id) >= 0; }   // 畫面只在「這個操作 ID 真的寫進去了」才公布結果
     function discardBroken() {   // 家長明確按「清除並重新開始」：一樣先驗證、寫入成功才公布；v1 原文不動
-      if (st.loadError !== "SCHEMA" && st.loadError !== "MIGRATE") return false;
+      if (readonly() || (st.loadError !== "SCHEMA" && st.loadError !== "MIGRATE")) return false;
       var b0 = blankState();
       if (checkState(b0, bank).length) return false;
       try { storage.setItem(LS_KEY, JSON.stringify(b0)); lastRaw = JSON.stringify(b0); } catch (e) { st.saveStatus = "failed"; return false; }
       st.loadError = null; st.migrateReason = null; st.state = b0; st.saveStatus = "ok"; st.pendingAction = null;
       return true;
     }
-    return { get: function () { return st; }, load: load, dispatch: dispatch, retry: retry, accepted: accepted, discardBroken: discardBroken,
+    return { get: function () { return st; }, load: load, dispatch: dispatch, retry: retry, accepted: accepted, discardBroken: discardBroken, reload: reload, readonly: readonly,
              view: function () { return view(st.state, env()); }, env: env };
   }
 
@@ -2137,8 +2156,26 @@ function makeStorage(){
   memoryOnly=true; var m={};
   return {getItem:function(k){return Object.prototype.hasOwnProperty.call(m,k)?m[k]:null;},setItem:function(k,v){m[k]=String(v);}};
 }
-var store = C.createStore({storage:makeStorage(), bank:BANK, clock:function(){return Date.now();}});
+// 單一寫入分頁（同錯題站；Codex 審 8364a83 T15／T18）：同一時間只有一個分頁能作答與存檔，其他分頁唯讀。
+// 開頁先決定寫入權、再跑原本的開頁流程（whenLockDecided）：拿到寫入權的頁面，開頁路徑與改版前逐字相同
+// （先開頁、後拿寫入權會讓開頁那一次畫面在唯讀下畫出，自然站地圖長大動畫與「開頁不寫存檔」都因此壞掉）。
+// 被別的分頁拿著＝唯讀開頁並排隊，那一頁關掉後接手（先換成磁碟最新版）；瀏覽器不支援＝唯讀並明講；鎖 2 秒沒回應＝先唯讀開頁
+var WRITER=false, LOCKMODE="BOOT", LOCKNAME="g5soc.v1:writer", LOCKDONE=false, LOCKQ=[];
+var store = C.createStore({storage:makeStorage(), bank:BANK, clock:function(){return Date.now();}, lock:{held:function(){return WRITER;}}});
 store.load();
+function whenLockDecided(fn){if(LOCKDONE)fn();else LOCKQ.push(fn);}
+function lockDecided(){if(LOCKDONE)return;LOCKDONE=true;var q=LOCKQ;LOCKQ=[];q.forEach(function(f){f();});}
+function gotWriter(){var late=LOCKDONE;WRITER=true;LOCKMODE="W";store.reload();lockDecided();if(late){banners();if(screen==="home")renderHome();}return new Promise(function(){});}
+(function(){
+  var L=navigator.locks;
+  if(!L||typeof L.request!=="function"){LOCKMODE="NOLOCK";lockDecided();return;}
+  setTimeout(function(){if(!LOCKDONE){LOCKMODE="RO";lockDecided();banners();}},2000);
+  try{L.request(LOCKNAME,{ifAvailable:true},function(l){
+    if(l) return gotWriter();
+    LOCKMODE="RO"; lockDecided(); banners();
+    L.request(LOCKNAME,gotWriter).catch(function(){});
+  }).catch(function(){LOCKMODE="NOLOCK";lockDecided();banners();});}catch(e){LOCKMODE="NOLOCK";lockDecided();}
+})();
 var seq = 0;
 function newId(p){seq++;return (p||"a")+Date.now().toString(36)+seq.toString(36)+Math.floor(Math.random()*1e6).toString(36);}
 function S(){return store.get().state;}
@@ -2185,6 +2222,8 @@ function banners(){
   else if(st.loadError) h+='<div class="banner"><strong>讀不到這台裝置的作答紀錄</strong><span class="small">為了不蓋掉看不到的紀錄，現在不會存任何作答。請改用一般瀏覽模式，或重新整理頁面再試。</span></div>';
   else if(memoryOnly) h+='<div class="banner"><strong>這台裝置存不了作答紀錄</strong><span class="small">可能是無痕模式或關閉了網站資料。請改用一般瀏覽模式開啟，否則關掉頁面紀錄就會不見。</span></div>';
   else if(st.saveStatus==="invalid") h+='<div class="banner"><strong>剛剛那一步沒有存（資料檢查沒通過）</strong><span class="small">紀錄沒有被改動。請重新整理頁面；如果一直出現，請爸媽告訴我。</span></div>';
+  else if(LOCKMODE==="RO") h+='<div class="banner"><strong>另一個分頁正在練習</strong><span class="small">同一時間只能在一個分頁作答，這一頁先只能看。請回到那一頁練習，或把那一頁關掉，這一頁就會接手。</span></div>';
+  else if(LOCKMODE==="NOLOCK") h+='<div class="banner"><strong>這個瀏覽器版本太舊，不能存作答</strong><span class="small">紀錄照常顯示，但這一頁不會存任何作答。請更新瀏覽器（iPad／iPhone 要 iOS 15.4 以上）再開。</span></div>';
   else if(st.saveStatus==="failed") h+='<div class="banner"><strong>剛剛那一步沒有存到這台裝置</strong><div class="row"><button class="btn sm" type="button" id="retrySave">再存一次</button></div></div>';
   var v=V();
   if(v.needsHelp.length) h+='<div class="banner info"><strong>需要爸媽陪著看的觀念：'+v.needsHelp.map(function(c){return esc(CONCEPTS[c].short);}).join("、")+'</strong><span class="small">換了題目還是卡住，這很正常。請陪她看一次圖解，再到「家長摘要」按「已經陪她看過」。</span></div>';
@@ -2273,7 +2312,9 @@ function renderHome(){
   if(!v.planIds.length){
     h='<div class="done"><b class="t">今天沒有排定卡片</b><p class="muted" style="margin:0">可以點下面的觀念看解說，或「考考爸媽」。</p>'+cont+'<div class="row" style="justify-content:center"><button class="btn ghost" type="button" id="goTeach">考考爸媽</button></div></div>';
   }else if(v.completed){
-    h='<div class="done"><b class="t">今天的卡片都做完了</b><p class="muted" style="margin:0">今天 '+v.M.cardProgress.planned+' 張全部完成。想加碼可以看觀念解說、考考爸媽'+(se&&redoIds(se).length?'，或再練答錯的卡':'')+'。</p>'+cont+
+    // complete_missing：計畫裡有題目後來被拿出題庫（做不了），只報實際做完幾張，不說「全部完成」（Codex 審 8364a83 T23）
+    var doneMsg=v.planStatus==="complete_missing"?'今天做完 '+v.doneIds.length+' 張；另有 '+v.missingIds.length+' 張題目已不在題庫，不用做。':'今天 '+v.M.cardProgress.planned+' 張全部完成。';
+    h='<div class="done"><b class="t">今天的卡片都做完了</b><p class="muted" style="margin:0">'+doneMsg+'想加碼可以看觀念解說、考考爸媽'+(se&&redoIds(se).length?'，或再練答錯的卡':'')+'。</p>'+cont+
       '<div class="row" style="justify-content:center">'+(se&&redoIds(se).length?'<button class="btn ghost" type="button" id="goRedo">再練答錯的 '+redoIds(se).length+' 張</button>':'')+'<button class="btn ghost" type="button" id="goTeach">考考爸媽</button></div></div>';
   }else{
     var due=v.planIds.filter(function(id){return C.cardState(S(),id).seen>0;}).length, fresh=v.planIds.length-due;
@@ -2340,7 +2381,7 @@ function wireReview(el){
   el.querySelectorAll("button[data-rvall]").forEach(function(b){b.onclick=function(){startReview(b.dataset.rvall,true);};});
 }
 // 開始一輪：sessionStart 真的存進去才進練習畫面；沒存到就留在原畫面（提示列會出現「再存一次」）
-function beginRound(a){var pv=V();if(pv.makeupPending&&pv.session){act({type:"makeupClaim",day:pv.makeupPending,ids:pv.session.answered.slice()});}var r=act(a);if(r.ok)startRound();return r;}   // 開新一輪前先結算待結算的補做，免得被新回合蓋掉（Codex 審 g5-sci-review ee9c2f4）
+function beginRound(a){var pv=V();if(pv.makeupPending&&pv.session){act({type:"makeupClaim",answerDay:pv.session.day,day:pv.makeupPending,ids:pv.session.answered.slice()});}var r=act(a);if(r.ok)startRound();return r;}   // 開新一輪前先結算待結算的補做，免得被新回合蓋掉（Codex 審 g5-sci-review ee9c2f4）
 function startRound(){screen="practice";route();window.scrollTo({top:$("#main").offsetTop-8,behavior:"smooth"});}
 function renderConcepts(){
   var v=V();
@@ -2361,7 +2402,7 @@ function renderConcepts(){
 // 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）：今天的卡做完後，日曆下方列出之前沒練的日子，按了補一份那天的新卡。
 // 補做過的日子在日曆上是淺綠色（核心在那天記 madeUp＝哪天補的）；連續天數照算。
 var myMakeup=null;   // 本分頁開始的補做日（只有它由本分頁結算；重新整理後由 session 接手，見 renderHome 的「繼續補做」）
-var MAKEUP_MSG={MAKEUP_TODAY_FIRST:"先把今天的卡做完，才能補做前面的日子。",MAKEUP_DAY:"這一天已經練過了，不用補。",MAKEUP_EMPTY:"現在沒有可以補做的卡：新卡都練過了，其他的卡不是今天練過、就是已經學會。明天再來補。",MAKEUP_ALLDONE:"每一張卡都已經學會了（練過、也在三個不同的日子答對），沒有卡可以拿來補做。",MAKEUP_NONE:"這一輪的題目沒辦法算到那一天（可能另一個分頁已經用掉，或跨過半夜了）。那一天還是可以再補一次。"};
+var MAKEUP_MSG={MAKEUP_TODAY_FIRST:"先把今天的卡做完，才能補做前面的日子。",MAKEUP_DAY:"這一天已經練過了，不用補。",MAKEUP_EMPTY:"現在沒有可以補做的卡：新卡都練過了，其他的卡不是今天練過、就是已經學會。明天再來補。",MAKEUP_ALLDONE:"每一張卡都已經學會了（練過、也在兩個不同的日子答對），沒有卡可以拿來補做。",MAKEUP_STALE:"這一輪是在午夜以前做的，過了午夜就不能記到補做；那一天之後還可以再補。",READONLY:"另一個分頁正在練習，這一頁先只能看。",MAKEUP_NONE:"這一輪的題目沒辦法算到那一天（可能另一個分頁已經用掉，或跨過半夜了）。那一天還是可以再補一次。"};
 function madeUp(s,k){return !!(s.days[k]&&s.days[k].madeUp);}
 function renderCal(){
   var s=S(), v=V(), cells=[], k=START;
@@ -2637,7 +2678,7 @@ function renderEnd(){
   var mkDone=se.makeup&&se.answered.length&&(!se.queue.length||se.halted);
   if(mkDone&&se.makeup===myMakeup){
     var dd=S().days[se.makeup];
-    if(!(dd&&dd.madeUp)){var cr=act({type:"makeupClaim",day:se.makeup,ids:se.answered.slice()});if(!cr.ok&&cr.error&&MAKEUP_MSG[cr.error])mkMsg=MAKEUP_MSG[cr.error];}
+    if(!(dd&&dd.madeUp)){var cr=act({type:"makeupClaim",answerDay:se.day,day:se.makeup,ids:se.answered.slice()});if(!cr.ok&&cr.error&&MAKEUP_MSG[cr.error])mkMsg=MAKEUP_MSG[cr.error];}
     dd=S().days[se.makeup];
   }
   if(mkDone) dd=S().days[se.makeup];
@@ -2878,8 +2919,7 @@ window.addEventListener("hashchange",openFromHash);
     document.head.appendChild(sc);
   });
 })();
-renderHome();
-openFromHash(); booted=true;
+whenLockDecided(function(){renderHome();openFromHash(); booted=true;});   // 開頁：等寫入權決定（見儲存段）
 })();
 </script>
 <script src="https://windsorya.github.io/g5-help/qrcode.js"></script>

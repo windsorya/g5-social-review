@@ -82,7 +82,8 @@
   function poolCards(state, bank, day) {
     var ref = {};
     if (day && state.days[day]) state.days[day].planIds.forEach(function (id) { ref[id] = 1; });
-    if (state.session) state.session.queue.concat(state.session.answered).forEach(function (id) { ref[id] = 1; });
+    // 回合只在它就是 day 那天的才算（Codex 審 8364a83 R2b：昨天沒答完的回合帶著停止出新的題，混進今天的母體）
+    if (state.session && (!day || state.session.day === day)) state.session.queue.concat(state.session.answered).forEach(function (id) { ref[id] = 1; });
     return enabledCards(state, bank).filter(function (c) { return isActive(bank, c.id) || cardState(state, c.id).seen > 0 || ref[c.id]; });
   }
   function cardState(state, id) { return state.cards[id] || { seen: 0, goodDays: [], blockedDay: null, due: null }; }
@@ -93,7 +94,7 @@
 
   /* ---------- 空白狀態 ---------- */
   function blankState() {
-    return { v: 3, cards: {}, exits: {}, days: {}, labRuns: {}, session: null, log: [], ops: [],
+    return { v: 4, cards: {}, exits: {}, days: {}, labRuns: {}, session: null, log: [], ops: [],
              help: {}, extra: [], settings: { unit3: false, sound: true, tone: 0 } };
   }
   function blankDay() { return { planIds: [], doneIds: [], touched: [], extraDone: false, labRuns: 0, teach: 0, mood: null }; }
@@ -127,9 +128,12 @@
   function makeupCards(state, bank, today0, td, mk) {
     var cards = enabledCards(state, bank), n = newQuota(mk), hit = {};
     state.log.forEach(function (e) { if (e.d === td) hit[e.card] = 1; });
+    today0.touched.forEach(function (id) { hit[id] = 1; });   // 作答紀錄會截斷：當天練過的也記在 touched（Codex 審 8364a83：截斷後補做又排出已用過的卡）
+    Object.keys(state.days).forEach(function (k) { if (state.days[k].madeUp === td) state.days[k].touched.forEach(function (id) { hit[id] = 1; }); });
     var fresh = cards.filter(function (c) { return cardState(state, c.id).seen === 0 && isActive(bank, c.id) && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
     if (fresh.length) return fresh.slice(0, n);
-    var old = cards.filter(function (c) { var cs = cardState(state, c.id); return cs.seen > 0 && !retired(cs) && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
+    // 練過的只出已到期的（Codex 審 4d061e3：補做不看到期日 ⇒ 答對隔天就能補做再答對、提早學會，繞過「隔 3 天」）
+    var old = cards.filter(function (c) { var cs = cardState(state, c.id); return cs.seen > 0 && !retired(cs) && !!cs.due && cs.due <= td && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
     return reviewOrder(state, bank, old).slice(0, n);
   }
   // 可以補做的日子：從 start 到昨天、那天一張都沒練過
@@ -290,7 +294,7 @@
           cs.goodDays.push(today);
           var n = cs.goodDays.length;
           cs.due = n >= GRAD_DAYS ? null : addDays(today, FIRST_GAP);
-          info.graduated = n >= 3;
+          info.graduated = n >= GRAD_DAYS;   // 跟排程同一個門檻（Codex 審 8364a83：排程改 2 天、回饋還寫死 3）
         } else if (cs.due === null && cs.goodDays.length === 0) {
           cs.due = addDays(today, 1);   // 第一次見到就是變式或重答：至少明天要回來
         }
@@ -324,6 +328,9 @@
       case "makeupClaim": {
         var ck = action.day;
         if (!isDay(ck) || ck >= today || (s.days[ck] && s.days[ck].touched.length)) return fail(state0, "MAKEUP_DAY");
+        // 結算請求綁「這些題是哪一天答的」（設計報告 (C)5；Codex 審 8364a83 T16）：送出時那一天已過＝拒領，
+        // 不拿重試當下的今天去認領——昨天答的不冒算成今天，目標日保持可補
+        if (action.answerDay !== today) return fail(state0, "MAKEUP_STALE");
         var got = claimable(s, today, Array.isArray(action.ids) ? action.ids : []);
         if (!got.length) return fail(state0, "MAKEUP_NONE");
         var cd = s.days[ck] || (s.days[ck] = blankDay());   // 那天原本的實驗、考考爸媽、心情紀錄照留
@@ -512,6 +519,9 @@
       makeupPending: (s.session && s.session.makeup && s.session.day === today && (!s.session.queue.length || s.session.halted) && s.session.answered.length &&
         !(s.days[s.session.makeup] && s.days[s.session.makeup].touched.length)) ? s.session.makeup : null,
       completed: completedIn(s, bank, d), session: s.session, stages: stages, day: d,
+      // 首頁只照這個挑文字（Codex 審 8364a83 T23：計畫裡有題目已不在題庫時，原本照樣說「N 張全部完成」）
+      planStatus: !d.planIds.length ? "empty" : !completedIn(s, bank, d) ? "open" :
+        d.planIds.some(function (id) { return d.doneIds.indexOf(id) < 0 && !cardById(s, bank, id); }) ? "complete_missing" : "complete",
       M: { cardProgress: { done: d.doneIds.length, planned: d.planIds.length }, exitPending: exitPending, extraDone: d.extraDone },
       exitLater: exitLater,
       needsHelp: Object.keys(s.help).filter(function (cid) { return s.help[cid].needsHelp && bank.concepts[cid] && conceptOn(s, bank, cid); })
@@ -549,7 +559,7 @@
   function checkState(o, bank) {
     var errs = [];
     function bad(m) { errs.push(m); }
-    if (!isObj(o) || o.v !== 3) { bad("v"); return errs; }
+    if (!isObj(o) || o.v !== 4) { bad("v"); return errs; }
     if (!isObj(o.cards)) bad("cards"); else Object.keys(o.cards).forEach(function (k) {
       var c = o.cards[k];
       if (!isObj(c) || !isNat(c.seen) || !dayList(c.goodDays) || c.goodDays.length > 3 ||
@@ -607,6 +617,9 @@
   function decode(text, bank) {
     var o;
     try { o = JSON.parse(text); } catch (e) { return { accepted: false, error: "SCHEMA", detail: ["json"] }; }
+    // v4（2026-10-18，Codex 審 8364a83 T17）：資料形狀與 v3 相同，只換版本號——v3 讀進來當 v4，之後一律寫 v4；
+    // 還開著的舊頁（只認 v3）寫入前會先讀磁碟，讀到 v4 就拒讀不寫，不會把新版計畫剪回舊規則
+    if (isObj(o) && o.v === 3) o.v = 4;
     var errs = checkState(o, bank);
     return errs.length ? { accepted: false, error: "SCHEMA", detail: errs } : { accepted: true, state: o };
   }
@@ -647,6 +660,10 @@
   /* ---------- 儲存層：寫入成功才公布（矩陣 27） ---------- */
   function createStore(opt) {
     var storage = opt.storage, bank = opt.bank, clock = opt.clock;
+    // 單一寫入分頁（同錯題站 g5wrong.v1:writer；Codex 審 8364a83 T15／T18）：opt.lock.held() 為假＝這一頁唯讀，
+    // 任何操作都不讀不寫、回 READONLY。app 一律接上 navigator.locks；不帶 lock 只給單頁測試用
+    var lock = opt.lock || null;
+    function readonly() { return !!lock && !lock.held(); }
     // loadError：SCHEMA（存檔讀得到但不合法）／READ（讀不到）／MIGRATE（舊資料搬不進去）——三種都封鎖寫入，絕不拿空白蓋掉看不到的資料
     // migrateReason（只在 loadError=MIGRATE 時有值）：PARSE 解析失敗／VERSION 版本不支援／BAD_V1 結構不合法／WRITE 寫不進去
     var st = { state: blankState(), saveStatus: "ok", pendingAction: null, loadError: null, migrateReason: null, syncMode: "local", migrated: false };
@@ -705,6 +722,7 @@
       return true;
     }
     function dispatch(action) {
+      if (readonly()) return { ok: false, error: "READONLY", state: st.state };
       // 先處理既有的待存操作（它自己會先讀磁碟）；補不進去就照舊回 SAVE_PENDING，畫面才會保留原本那筆
       // （Codex 審 2e70601：上一版先 refresh、失敗就回 SAVE_FAILED，畫面把待存換成新的那筆，恢復後重試只存舊的）。
       if (st.pendingAction && !(action && action.id && action.id === st.pendingAction.id)) {
@@ -735,16 +753,17 @@
       return { ok: true, info: r.info, state: st.state };
     }
     function retry() { return st.pendingAction ? dispatch(st.pendingAction) : { ok: true, nothing: true, state: st.state }; }
+    function reload() { if (!st.loadError) refresh(); return st; }   // 唯讀頁拿到寫入權時先換成磁碟最新版
     function accepted(id) { return st.state.ops.indexOf(id) >= 0; }   // 畫面只在「這個操作 ID 真的寫進去了」才公布結果
     function discardBroken() {   // 家長明確按「清除並重新開始」：一樣先驗證、寫入成功才公布；v1 原文不動
-      if (st.loadError !== "SCHEMA" && st.loadError !== "MIGRATE") return false;
+      if (readonly() || (st.loadError !== "SCHEMA" && st.loadError !== "MIGRATE")) return false;
       var b0 = blankState();
       if (checkState(b0, bank).length) return false;
       try { storage.setItem(LS_KEY, JSON.stringify(b0)); lastRaw = JSON.stringify(b0); } catch (e) { st.saveStatus = "failed"; return false; }
       st.loadError = null; st.migrateReason = null; st.state = b0; st.saveStatus = "ok"; st.pendingAction = null;
       return true;
     }
-    return { get: function () { return st; }, load: load, dispatch: dispatch, retry: retry, accepted: accepted, discardBroken: discardBroken,
+    return { get: function () { return st; }, load: load, dispatch: dispatch, retry: retry, accepted: accepted, discardBroken: discardBroken, reload: reload, readonly: readonly,
              view: function () { return view(st.state, env()); }, env: env };
   }
 

@@ -370,8 +370,26 @@ function makeStorage(){
   memoryOnly=true; var m={};
   return {getItem:function(k){return Object.prototype.hasOwnProperty.call(m,k)?m[k]:null;},setItem:function(k,v){m[k]=String(v);}};
 }
-var store = C.createStore({storage:makeStorage(), bank:BANK, clock:function(){return Date.now();}});
+// 單一寫入分頁（同錯題站；Codex 審 8364a83 T15／T18）：同一時間只有一個分頁能作答與存檔，其他分頁唯讀。
+// 開頁先決定寫入權、再跑原本的開頁流程（whenLockDecided）：拿到寫入權的頁面，開頁路徑與改版前逐字相同
+// （先開頁、後拿寫入權會讓開頁那一次畫面在唯讀下畫出，自然站地圖長大動畫與「開頁不寫存檔」都因此壞掉）。
+// 被別的分頁拿著＝唯讀開頁並排隊，那一頁關掉後接手（先換成磁碟最新版）；瀏覽器不支援＝唯讀並明講；鎖 2 秒沒回應＝先唯讀開頁
+var WRITER=false, LOCKMODE="BOOT", LOCKNAME="g5soc.v1:writer", LOCKDONE=false, LOCKQ=[];
+var store = C.createStore({storage:makeStorage(), bank:BANK, clock:function(){return Date.now();}, lock:{held:function(){return WRITER;}}});
 store.load();
+function whenLockDecided(fn){if(LOCKDONE)fn();else LOCKQ.push(fn);}
+function lockDecided(){if(LOCKDONE)return;LOCKDONE=true;var q=LOCKQ;LOCKQ=[];q.forEach(function(f){f();});}
+function gotWriter(){var late=LOCKDONE;WRITER=true;LOCKMODE="W";store.reload();lockDecided();if(late){banners();if(screen==="home")renderHome();}return new Promise(function(){});}
+(function(){
+  var L=navigator.locks;
+  if(!L||typeof L.request!=="function"){LOCKMODE="NOLOCK";lockDecided();return;}
+  setTimeout(function(){if(!LOCKDONE){LOCKMODE="RO";lockDecided();banners();}},2000);
+  try{L.request(LOCKNAME,{ifAvailable:true},function(l){
+    if(l) return gotWriter();
+    LOCKMODE="RO"; lockDecided(); banners();
+    L.request(LOCKNAME,gotWriter).catch(function(){});
+  }).catch(function(){LOCKMODE="NOLOCK";lockDecided();banners();});}catch(e){LOCKMODE="NOLOCK";lockDecided();}
+})();
 var seq = 0;
 function newId(p){seq++;return (p||"a")+Date.now().toString(36)+seq.toString(36)+Math.floor(Math.random()*1e6).toString(36);}
 function S(){return store.get().state;}
@@ -418,6 +436,8 @@ function banners(){
   else if(st.loadError) h+='<div class="banner"><strong>讀不到這台裝置的作答紀錄</strong><span class="small">為了不蓋掉看不到的紀錄，現在不會存任何作答。請改用一般瀏覽模式，或重新整理頁面再試。</span></div>';
   else if(memoryOnly) h+='<div class="banner"><strong>這台裝置存不了作答紀錄</strong><span class="small">可能是無痕模式或關閉了網站資料。請改用一般瀏覽模式開啟，否則關掉頁面紀錄就會不見。</span></div>';
   else if(st.saveStatus==="invalid") h+='<div class="banner"><strong>剛剛那一步沒有存（資料檢查沒通過）</strong><span class="small">紀錄沒有被改動。請重新整理頁面；如果一直出現，請爸媽告訴我。</span></div>';
+  else if(LOCKMODE==="RO") h+='<div class="banner"><strong>另一個分頁正在練習</strong><span class="small">同一時間只能在一個分頁作答，這一頁先只能看。請回到那一頁練習，或把那一頁關掉，這一頁就會接手。</span></div>';
+  else if(LOCKMODE==="NOLOCK") h+='<div class="banner"><strong>這個瀏覽器版本太舊，不能存作答</strong><span class="small">紀錄照常顯示，但這一頁不會存任何作答。請更新瀏覽器（iPad／iPhone 要 iOS 15.4 以上）再開。</span></div>';
   else if(st.saveStatus==="failed") h+='<div class="banner"><strong>剛剛那一步沒有存到這台裝置</strong><div class="row"><button class="btn sm" type="button" id="retrySave">再存一次</button></div></div>';
   var v=V();
   if(v.needsHelp.length) h+='<div class="banner info"><strong>需要爸媽陪著看的觀念：'+v.needsHelp.map(function(c){return esc(CONCEPTS[c].short);}).join("、")+'</strong><span class="small">換了題目還是卡住，這很正常。請陪她看一次圖解，再到「家長摘要」按「已經陪她看過」。</span></div>';
@@ -506,7 +526,9 @@ function renderHome(){
   if(!v.planIds.length){
     h='<div class="done"><b class="t">今天沒有排定卡片</b><p class="muted" style="margin:0">可以點下面的觀念看解說，或「考考爸媽」。</p>'+cont+'<div class="row" style="justify-content:center"><button class="btn ghost" type="button" id="goTeach">考考爸媽</button></div></div>';
   }else if(v.completed){
-    h='<div class="done"><b class="t">今天的卡片都做完了</b><p class="muted" style="margin:0">今天 '+v.M.cardProgress.planned+' 張全部完成。想加碼可以看觀念解說、考考爸媽'+(se&&redoIds(se).length?'，或再練答錯的卡':'')+'。</p>'+cont+
+    // complete_missing：計畫裡有題目後來被拿出題庫（做不了），只報實際做完幾張，不說「全部完成」（Codex 審 8364a83 T23）
+    var doneMsg=v.planStatus==="complete_missing"?'今天做完 '+v.doneIds.length+' 張；另有 '+v.missingIds.length+' 張題目已不在題庫，不用做。':'今天 '+v.M.cardProgress.planned+' 張全部完成。';
+    h='<div class="done"><b class="t">今天的卡片都做完了</b><p class="muted" style="margin:0">'+doneMsg+'想加碼可以看觀念解說、考考爸媽'+(se&&redoIds(se).length?'，或再練答錯的卡':'')+'。</p>'+cont+
       '<div class="row" style="justify-content:center">'+(se&&redoIds(se).length?'<button class="btn ghost" type="button" id="goRedo">再練答錯的 '+redoIds(se).length+' 張</button>':'')+'<button class="btn ghost" type="button" id="goTeach">考考爸媽</button></div></div>';
   }else{
     var due=v.planIds.filter(function(id){return C.cardState(S(),id).seen>0;}).length, fresh=v.planIds.length-due;
@@ -573,7 +595,7 @@ function wireReview(el){
   el.querySelectorAll("button[data-rvall]").forEach(function(b){b.onclick=function(){startReview(b.dataset.rvall,true);};});
 }
 // 開始一輪：sessionStart 真的存進去才進練習畫面；沒存到就留在原畫面（提示列會出現「再存一次」）
-function beginRound(a){var pv=V();if(pv.makeupPending&&pv.session){act({type:"makeupClaim",day:pv.makeupPending,ids:pv.session.answered.slice()});}var r=act(a);if(r.ok)startRound();return r;}   // 開新一輪前先結算待結算的補做，免得被新回合蓋掉（Codex 審 g5-sci-review ee9c2f4）
+function beginRound(a){var pv=V();if(pv.makeupPending&&pv.session){act({type:"makeupClaim",answerDay:pv.session.day,day:pv.makeupPending,ids:pv.session.answered.slice()});}var r=act(a);if(r.ok)startRound();return r;}   // 開新一輪前先結算待結算的補做，免得被新回合蓋掉（Codex 審 g5-sci-review ee9c2f4）
 function startRound(){screen="practice";route();window.scrollTo({top:$("#main").offsetTop-8,behavior:"smooth"});}
 function renderConcepts(){
   var v=V();
@@ -594,7 +616,7 @@ function renderConcepts(){
 // 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）：今天的卡做完後，日曆下方列出之前沒練的日子，按了補一份那天的新卡。
 // 補做過的日子在日曆上是淺綠色（核心在那天記 madeUp＝哪天補的）；連續天數照算。
 var myMakeup=null;   // 本分頁開始的補做日（只有它由本分頁結算；重新整理後由 session 接手，見 renderHome 的「繼續補做」）
-var MAKEUP_MSG={MAKEUP_TODAY_FIRST:"先把今天的卡做完，才能補做前面的日子。",MAKEUP_DAY:"這一天已經練過了，不用補。",MAKEUP_EMPTY:"現在沒有可以補做的卡：新卡都練過了，其他的卡不是今天練過、就是已經學會。明天再來補。",MAKEUP_ALLDONE:"每一張卡都已經學會了（練過、也在三個不同的日子答對），沒有卡可以拿來補做。",MAKEUP_NONE:"這一輪的題目沒辦法算到那一天（可能另一個分頁已經用掉，或跨過半夜了）。那一天還是可以再補一次。"};
+var MAKEUP_MSG={MAKEUP_TODAY_FIRST:"先把今天的卡做完，才能補做前面的日子。",MAKEUP_DAY:"這一天已經練過了，不用補。",MAKEUP_EMPTY:"現在沒有可以補做的卡：新卡都練過了，其他的卡不是今天練過、就是已經學會。明天再來補。",MAKEUP_ALLDONE:"每一張卡都已經學會了（練過、也在兩個不同的日子答對），沒有卡可以拿來補做。",MAKEUP_STALE:"這一輪是在午夜以前做的，過了午夜就不能記到補做；那一天之後還可以再補。",READONLY:"另一個分頁正在練習，這一頁先只能看。",MAKEUP_NONE:"這一輪的題目沒辦法算到那一天（可能另一個分頁已經用掉，或跨過半夜了）。那一天還是可以再補一次。"};
 function madeUp(s,k){return !!(s.days[k]&&s.days[k].madeUp);}
 function renderCal(){
   var s=S(), v=V(), cells=[], k=START;
@@ -870,7 +892,7 @@ function renderEnd(){
   var mkDone=se.makeup&&se.answered.length&&(!se.queue.length||se.halted);
   if(mkDone&&se.makeup===myMakeup){
     var dd=S().days[se.makeup];
-    if(!(dd&&dd.madeUp)){var cr=act({type:"makeupClaim",day:se.makeup,ids:se.answered.slice()});if(!cr.ok&&cr.error&&MAKEUP_MSG[cr.error])mkMsg=MAKEUP_MSG[cr.error];}
+    if(!(dd&&dd.madeUp)){var cr=act({type:"makeupClaim",answerDay:se.day,day:se.makeup,ids:se.answered.slice()});if(!cr.ok&&cr.error&&MAKEUP_MSG[cr.error])mkMsg=MAKEUP_MSG[cr.error];}
     dd=S().days[se.makeup];
   }
   if(mkDone) dd=S().days[se.makeup];
@@ -1111,8 +1133,7 @@ window.addEventListener("hashchange",openFromHash);
     document.head.appendChild(sc);
   });
 })();
-renderHome();
-openFromHash(); booted=true;
+whenLockDecided(function(){renderHome();openFromHash(); booted=true;});   // 開頁：等寫入權決定（見儲存段）
 })();
 </script>
 <script src="https://windsorya.github.io/g5-help/qrcode.js"></script>
