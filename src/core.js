@@ -142,6 +142,12 @@
     var se = state && state.session;
     return !!(se && se.makeup && se.day === day && se.queue.length && !se.halted && se.answered.length);
   }
+  // 尚未結算、已有作答的補做（進行中、待結算、停輪都算）：新回合一律不得覆寫——覆寫就丟了補做歸屬與結算入口。
+  // 待存的最後一題補存後回合會從「進行中」轉成「待結算」，只擋進行中會漏（Codex 審 6b45578 F1）
+  function makeupUnsettled(state, day) {
+    var se = state && state.session;
+    return !!(se && se.makeup && se.day === day && se.answered.length && !(state.days[se.makeup] && state.days[se.makeup].touched.length));
+  }
   // 可以補做的日子：從 start 到昨天、那天一張都沒練過
   function missedDays(state, start, today0) {
     var out = [], k = start;
@@ -248,7 +254,7 @@
       case "tick": break;
 
       case "sessionStart": {
-        if (makeupInProgress(s, today)) return fail(state0, "MAKEUP_IN_PROGRESS");   // 做到一半的補做不得被任何新回合覆蓋
+        if (makeupUnsettled(s, today)) return fail(state0, "MAKEUP_IN_PROGRESS");   // 有作答、還沒結算的補做不得被任何新回合覆蓋
         if (action.kind === "makeup") {
           var mk = action.day;
           if (!isDay(mk) || mk >= today || (s.days[mk] && s.days[mk].touched.length)) return fail(state0, "MAKEUP_DAY");
@@ -824,7 +830,7 @@
     LS_KEY: LS_KEY, LS_V1: LS_V1, DISSOLVE: DISSOLVE, EXAM: EXAM,
     dayKey: dayKey, isDay: isDay, addDays: addDays, diffDays: diffDays, weekday: weekday,
     validCard: validCard, blankState: blankState, reduce: reduce, view: view, endTitle: endTitle, exitList: exitList,
-    makeupInProgress: makeupInProgress, checkState: checkState, decode: decode, migrateV1: migrateV1, createStore: createStore,
+    makeupInProgress: makeupInProgress, makeupUnsettled: makeupUnsettled, checkState: checkState, decode: decode, migrateV1: migrateV1, createStore: createStore,
     cardState: cardState, cardById: cardById, isActive: isActive, poolCards: poolCards, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
     dissolveNew: dissolveNew, dissolveAddSugar: dissolveAddSugar, dissolveAddSalt: dissolveAddSalt,
     dissolveStep: dissolveStep, dissolveRead: dissolveRead, shadowFromSun: shadowFromSun, dirName: dirName

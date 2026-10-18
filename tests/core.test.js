@@ -1120,10 +1120,12 @@ test("T15 補做回合答錯照一般規則：進「再練答錯的」、換一�
   // 2026-10-18（Codex 審 3704a12 B7）：做到一半的補做不得被新回合覆蓋 ⇒ 先把這一輪補做答完，再按「再練答錯的」
   assert.equal(C.reduce(s, op("sessionStart", { kind: "redo", ids: [c0] }), env(B12, NOON(D))).error, "MAKEUP_IN_PROGRESS");
   while (s.session.queue.length && !s.session.halted) s = run(s, B12, NOON(D), op("answer", { cardId: s.session.queue[0], ok: true }));
-  s = run(s, B12, NOON(D), op("sessionStart", { kind: "redo", ids: [c0] }));
-  assert.equal(s.session.makeup, undefined);
+  // 答完、還沒結算＝待結算的補做也不得被覆寫（Codex 審 6b45578 F1）；畫面的結束頁本來就先結算才出現「再練答錯的」
+  assert.equal(C.reduce(s, op("sessionStart", { kind: "redo", ids: [c0] }), env(B12, NOON(D))).error, "MAKEUP_IN_PROGRESS");
   s = run(s, B12, NOON(D), op("makeupClaim", { answerDay: D, day: MK, ids: [c0] }));
   assert.deepEqual(s.days[MK].touched, [c0], "答錯的卡今天也練過了，結算算數");
+  s = run(s, B12, NOON(D), op("sessionStart", { kind: "redo", ids: [c0] }));
+  assert.equal(s.session.makeup, undefined);
 });
 
 test("T16 補做回合跨午夜被換成當天計畫：補做那天沒被寫，仍可補", () => {
@@ -1437,4 +1439,24 @@ test("M10 補做進行中（今天、還有題、沒停輪、至少答過一題�
   assert.equal(C.makeupInProgress(JSON.parse(disk.raw[C.LS_KEY]), D), true);
   const halted = JSON.parse(disk.raw[C.LS_KEY]); halted.session.halted = true;
   assert.equal(C.makeupInProgress(halted, D), false, "停輪的走結算入口，不算進行中");
+});
+
+
+test("M11 待存的最後一題補存後補做變成待結算（或停輪）：新回合照樣不得覆寫，結算入口留著（Codex 審 6b45578／908ca98／07d638a F1）", () => {
+  let s = doneToday(B12);
+  s = run(s, B12, NOON(D), op("sessionStart", { kind: "makeup", day: MK }));
+  while (s.session.queue.length > 1) s = run(s, B12, NOON(D), op("answer", { cardId: s.session.queue[0], ok: true }));
+  const last = s.session.queue[0];
+  const disk = memStorage({ [C.LS_KEY]: JSON.stringify(s) });
+  const st = C.createStore({ storage: disk, bank: B12, clock: () => NOON(D) }); st.load();
+  disk.setFail(true);
+  assert.equal(st.dispatch(op("answer", { cardId: last, ok: true })).ok, false, "最後一題寫入失敗、留在待存");
+  disk.setFail(false);
+  const r = st.dispatch(op("sessionStart", { kind: "review", ids: [B12.cards[0].id] }));
+  assert.equal(r.error, "MAKEUP_IN_PROGRESS");
+  const saved = JSON.parse(disk.raw[C.LS_KEY]);
+  assert.deepEqual([saved.session.makeup, saved.session.queue.length, saved.session.answered.includes(last)], [MK, 0, true]);
+  assert.equal(C.view(saved, env(B12, NOON(D))).makeupPending, MK, "結算入口還在");
+  const after = run(saved, B12, NOON(D), op("makeupClaim", { answerDay: D, day: MK, ids: saved.session.answered }));
+  assert.ok(run(after, B12, NOON(D), op("sessionStart", { kind: "review", ids: [B12.cards[0].id] })).session, "結算後就能開新回合");
 });

@@ -595,8 +595,9 @@ function wireReview(el){
   el.querySelectorAll("button[data-rvall]").forEach(function(b){b.onclick=function(){startReview(b.dataset.rvall,true);};});
 }
 // 開始一輪：sessionStart 真的存進去才進練習畫面；沒存到就留在原畫面（提示列會出現「再存一次」）
-function beginRound(a){var pv=V();var se0=pv.session;
-  if(pv.makeupPending&&pv.session){if(pv.makeupPending!==myMakeup){renderHome();toast("有一份 "+md(pv.makeupPending)+" 的補做還沒結算：請先按首頁的「結算」。");return {ok:false,error:"MAKEUP_PENDING_OTHER"};}act({type:"makeupClaim",answerDay:pv.session.day,day:pv.makeupPending,ids:pv.session.answered.slice()});}var r=act(a);if(r.ok)startRound();else if(r.error==="MAKEUP_IN_PROGRESS"){var se1=V().session;renderHome();toast((se1&&se1.makeup?md(se1.makeup)+" 的":"")+"補做還沒做完：先按「繼續補做」把它做完。");}return r;}   // 做到一半的補做由 core 擋（Codex 審 670a476／3704a12 B7）   // 開新一輪前先結算待結算的補做，免得被新回合蓋掉（Codex 審 g5-sci-review ee9c2f4）
+function beginRound(a){act({type:"tick"});var pv=V();   // 先讓 store 補存待存作答：判斷「本頁的待結算補做」要看補存後的回合（Codex 審 6b45578 F1）
+var se0=pv.session;
+  if(pv.makeupPending&&pv.session){if(pv.makeupPending!==myMakeup){renderHome();toast("有一份 "+md(pv.makeupPending)+" 的補做還沒結算：請先按首頁的「結算」。");return {ok:false,error:"MAKEUP_PENDING_OTHER"};}act({type:"makeupClaim",answerDay:pv.session.day,day:pv.makeupPending,ids:pv.session.answered.slice()});}var r=act(a);if(r.ok)startRound();else if(r.error==="MAKEUP_IN_PROGRESS"){var v1=V(),se1=v1.session;renderHome();toast((se1&&se1.makeup?md(se1.makeup)+" 的":"")+(v1.makeupPending?"補做還沒結算：先按首頁的「結算」。":"補做還沒做完：先按「繼續補做」把它做完。"));}return r;}   // 做到一半的補做由 core 擋（Codex 審 670a476／3704a12 B7）   // 開新一輪前先結算待結算的補做，免得被新回合蓋掉（Codex 審 g5-sci-review ee9c2f4）
 function startRound(){screen="practice";route();window.scrollTo({top:$("#main").offsetTop-8,behavior:"smooth"});}
 function renderConcepts(){
   var v=V();
