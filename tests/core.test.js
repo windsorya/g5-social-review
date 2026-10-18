@@ -785,22 +785,26 @@ test("R5/R8 v1 失敗原因分開記：解析失敗 PARSE、版本不支援 VERS
 
 function dayRec(plan, done, touched) { return { planIds: plan, doneIds: done, touched: touched || done.slice(), extraDone: false, labRuns: 0, teach: 0, mood: null }; }
 
-test("R4 D4-b doneIds 裡的消失卡要剔掉（殺突變 N3）：planIds=[s1]、doneIds=[]、進度 0/1", () => {
+// 2026-10-18 改期望（Codex 審 g5-math-review 3751016）：已做完的消失卡是歷史，計畫與已完成兩邊一起留（不變量 done⊂plan 照樣成立、突變 N3 照樣抓到）；
+//   原本兩邊一起剔掉，題庫裁題當天「今天已完成」會倒退、補做被鎖。還沒做的消失卡照舊從計畫拿掉。
+test("R4 D4-b 消失卡：已做完的在計畫與已完成兩邊一起留、沒做的從計畫拿掉（殺突變 N3）：進度 1/2", () => {
   const b = bank(["s1", "s2"]); const s = C.blankState();
-  s.days[D] = dayRec(["gone", "s1"], ["gone"]);
+  s.days[D] = dayRec(["gone", "gone2", "s1"], ["gone"]);
   const v = C.view(s, env(b, NOON(D)));
-  assert.deepEqual([v.planIds, v.doneIds, v.M.cardProgress], [["s1"], [], { done: 0, planned: 1 }]);
+  assert.deepEqual([v.planIds, v.doneIds, v.M.cardProgress], [["gone", "s1"], ["gone"], { done: 1, planned: 2 }]);
+  assert.ok(v.doneIds.every((id) => v.planIds.includes(id)), "已完成⊂計畫");
   assert.equal(v.completed, false);
   assert.deepEqual(s.days[D].doneIds, ["gone"], "view 不得改到輸入");
 });
 
-test("R4 D4-c session.answered／wrong 裡的消失卡要剔掉（殺突變 N4）", () => {
+// 2026-10-18 改期望（同上）：這一輪已答／答錯是歷史，照留（補做結算靠 answered；再練答錯的在 sessionStart 會略過不存在的卡）；待答的照舊拿掉
+test("R4 D4-c 消失卡：session 待答拿掉，已答／答錯照留", () => {
   const b = bank(["s1", "s2"]); const s = C.blankState();
   s.cards.s2 = learned(1, [D], "2026-10-21");
   s.days[D] = dayRec(["s1", "s2"], ["s2"], ["s2"]);
   s.session = { day: D, kind: "plan", queue: ["gone", "s1"], answered: ["gone", "s2"], wrong: ["gone", "s2"], kinds: {} };
   const v = C.view(s, env(b, NOON(D)));
-  assert.deepEqual([v.session.queue, v.session.answered, v.session.wrong], [["s1"], ["s2"], ["s2"]]);
+  assert.deepEqual([v.session.queue, v.session.answered, v.session.wrong], [["s1"], ["gone", "s2"], ["gone", "s2"]]);
   assert.equal(v.completed, false);
 });
 
@@ -1124,4 +1128,32 @@ test("T17（Grok 審 1b0aebe）每一張卡都畢業了 ⇒ MAKEUP_ALLDONE（不
   t.cards.z3 = { seen: 1, goodDays: [D], blockedDay: null, due: "2026-10-21" };   // z3 沒畢業、但今天已練 ⇒ 明天就有
   ["z1", "z2"].forEach((id) => { t.cards[id] = { seen: 3, goodDays: ["2026-10-15", "2026-10-17", "2026-10-19"], blockedDay: null, due: null }; });
   assert.equal(C.reduce(t, op("sessionStart", { kind: "makeup", day: MK }), env(b3, NOON(D))).error, "MAKEUP_EMPTY");
+});
+
+// 2026-10-18 題庫裁重複題（Codex 審 g5-math-review 3751016 兩項 P2）：被拿掉的卡只從「還沒做」的清單移除，已做完的紀錄照留
+test("V1 今天計畫已做完的卡被題庫拿掉：今天仍算完成，補做不被鎖", () => {
+  const b1 = bank(["v1"]), b2 = bank(["v2"]);
+  let s = run(C.blankState(), b1, NOON(D), op("answer", { cardId: "v1", ok: true }));
+  assert.equal(C.view(s, env(b1, NOON(D))).completed, true);
+  s = run(s, b2, NOON(D), op("tick"));
+  assert.deepEqual([s.days[D].planIds, s.days[D].doneIds], [["v1"], ["v1"]]);
+  assert.equal(C.view(s, env(b2, NOON(D))).completed, true);
+  const r = C.reduce(s, op("sessionStart", { kind: "makeup", day: "2026-10-19" }), env(b2, NOON(D)));
+  assert.notEqual(r.error, "MAKEUP_TODAY_FIRST");
+});
+test("V2 補做進行中，已答和待答的卡都被題庫拿掉：已答照留、待答移除，仍可結算", () => {
+  const b1 = bank(["p1", "m1", "m2"]), b2 = bank(["p1"]);
+  // 今天第一次操作時題庫只有 p1 ⇒ 今天計畫固定為 [p1]；做完才能補做，m1、m2 之後加入、給補做用
+  let s = run(C.blankState(), b2, NOON(D), op("answer", { cardId: "p1", ok: true }));
+  assert.equal(C.view(s, env(b1, NOON(D))).completed, true);
+  s = run(s, b1, NOON(D), op("sessionStart", { kind: "makeup", day: "2026-10-19" }));
+  const q = s.session.queue.slice();
+  assert.ok(q.length >= 2, q.join(","));
+  s = run(s, b1, NOON(D), op("answer", { cardId: q[0], ok: true }));
+  s = run(s, b2, NOON(D), op("tick"));
+  assert.deepEqual(s.session.answered, [q[0]], "已答照留");
+  assert.deepEqual(s.session.queue, [], "待答的被拿掉");
+  s = run(s, b2, NOON(D), op("makeupClaim", { day: "2026-10-19", ids: s.session.answered.slice() }));
+  assert.equal(s.days["2026-10-19"].madeUp, D);
+  assert.deepEqual(s.days["2026-10-19"].touched, [q[0]]);
 });

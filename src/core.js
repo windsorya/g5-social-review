@@ -183,12 +183,10 @@
   }
   function pruneVanished(state, bank, day) {
     var ok = function (id) { return !!cardById(state, bank, id); }, d = state.days[day];
-    if (d) { d.planIds = d.planIds.filter(ok); d.doneIds = d.doneIds.filter(ok); }
-    if (state.session) {
-      state.session.queue = state.session.queue.filter(ok);
-      state.session.answered = state.session.answered.filter(ok);
-      state.session.wrong = state.session.wrong.filter(ok);
-    }
+    // 只拿掉「還沒做」的：今天計畫裡未完成的、這一輪待答的。已做完的是歷史，照留——
+    // 2026-10-18 題庫裁重複題後（Codex 審 g5-math-review 3751016）：原本連已完成的也刪，今天的「完成」倒退、補做被鎖，進行中的補做也失去已答紀錄而無法結算
+    if (d) d.planIds = d.planIds.filter(function (id) { return ok(id) || d.doneIds.indexOf(id) >= 0; });
+    if (state.session) state.session.queue = state.session.queue.filter(ok);
   }
   // 跨午夜：日期與任務一起切換（矩陣 16、17）
   function syncSession(state, bank, day) {

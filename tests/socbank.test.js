@@ -18,7 +18,7 @@ const CIDS = Object.keys(B.CONCEPTS);
 
 test("①每題答案在選項內且唯一（ans 對到 a、選項不重複）", () => {
   const bad = [];
-  B.CARDS.forEach((c) => {
+  B.ALL_CARDS.forEach((c) => {
     const norm = c.opts.map((o) => o.replace(/\s/g, ""));
     if (new Set(norm).size !== norm.length) bad.push(c.id + " 選項重複");
     if (!(Number.isInteger(c.a) && c.a >= 0 && c.a < c.opts.length)) bad.push(c.id + " a 超出範圍");
@@ -30,7 +30,7 @@ test("①每題答案在選項內且唯一（ans 對到 a、選項不重複）",
 
 test("②每個錯誤選項都有 wrongWhy（非空），正解那格是空字串", () => {
   const bad = [];
-  B.CARDS.forEach((c) => {
+  B.ALL_CARDS.forEach((c) => {
     if (!Array.isArray(c.wrongWhy) || c.wrongWhy.length !== c.opts.length) { bad.push(c.id + " wrongWhy 長度不對"); return; }
     c.wrongWhy.forEach((w, i) => {
       if (i === c.a && w !== "") bad.push(c.id + " 正解不該有 wrongWhy");
@@ -43,7 +43,7 @@ test("②每個錯誤選項都有 wrongWhy（非空），正解那格是空字�
 test("③每題都有查證出處（src 對到 SOURCES，網址是 gov.tw／edu.tw），並標「自編題（未對課本）」", () => {
   const bad = [];
   Object.keys(B.SOURCES).forEach((k) => { const s = B.SOURCES[k]; if (!s.name || !OFFICIAL.test(s.url)) bad.push("SOURCES." + k + " 不是政府或教育機構網址：" + s.url); });
-  B.CARDS.forEach((c) => {
+  B.ALL_CARDS.forEach((c) => {
     if (!c.src || !B.SOURCES[c.src]) bad.push(c.id + " 沒有 src 或對不到 SOURCES");
     if (c.page !== "自編題（未對課本）") bad.push(c.id + " page 不是「自編題（未對課本）」");
   });
@@ -52,7 +52,7 @@ test("③每題都有查證出處（src 對到 SOURCES，網址是 gov.tw／edu.
 
 test("④題目、解說、錯誤選項解說、提示：每句 ≤40 字", () => {
   const long = [];
-  B.CARDS.forEach((c) => [c.q, c.why, c.hint].concat(c.wrongWhy).forEach((t) => sentences(t || "").forEach((s) => { if (s.length > MAX_SENTENCE) long.push(c.id + "：" + s); })));
+  B.ALL_CARDS.forEach((c) => [c.q, c.why, c.hint].concat(c.wrongWhy).forEach((t) => sentences(t || "").forEach((s) => { if (s.length > MAX_SENTENCE) long.push(c.id + "：" + s); })));
   CIDS.forEach((k) => [B.CONCEPTS[k].exit, B.CONCEPTS[k].exitAns].forEach((t) => sentences(t).forEach((s) => { if (s.length > MAX_SENTENCE) long.push(k + " 出口題：" + s); })));
   Object.keys(X.PREDICT).forEach((k) => [X.PREDICT[k].q, X.PREDICT[k].why].forEach((t) => sentences(t).forEach((s) => { if (s.length > MAX_SENTENCE) long.push(k + " 先想想看：" + s); })));
   assert.deepEqual(long, []);
@@ -60,46 +60,46 @@ test("④題目、解說、錯誤選項解說、提示：每句 ≤40 字", () =
 
 test("⑤每個觀念都有題（8～15 題），總數約 100 題；每個觀念都有解說與先想想看", () => {
   const n = {}; CIDS.forEach((k) => { n[k] = 0; });
-  B.CARDS.forEach((c) => { assert.ok(c.concept in n, c.id + " 的觀念不存在"); n[c.concept]++; });
+  B.ALL_CARDS.forEach((c) => { assert.ok(c.concept in n, c.id + " 的觀念不存在"); n[c.concept]++; });
   const off = CIDS.filter((k) => n[k] < 8 || n[k] > 15).map((k) => k + "=" + n[k]);
   assert.deepEqual(off, [], "題數不在 8～15：" + off.join("、"));
-  assert.ok(B.CARDS.length >= 90 && B.CARDS.length <= 110, "總題數 " + B.CARDS.length);
+  assert.ok(B.ALL_CARDS.length >= 90 && B.ALL_CARDS.length <= 110, "總題數 " + B.ALL_CARDS.length);
   CIDS.forEach((k) => { assert.ok(X.EXPLAIN[k] && X.EXPLAIN[k].length >= 2, k + " 缺解說"); const p = X.PREDICT[k]; assert.ok(p && p.a >= 0 && p.a < p.opts.length, k + " 缺先想想看"); });
 });
 
 test("⑥題卡 id 唯一、都通過 core.js 的題卡檢查", () => {
-  const ids = B.CARDS.map((c) => c.id);
+  const ids = B.ALL_CARDS.map((c) => c.id);
   assert.equal(new Set(ids).size, ids.length, "id 重複");
-  const bank = { cards: B.CARDS, concepts: {}, figs: {} };
+  const bank = { cards: B.ALL_CARDS, concepts: {}, figs: {} };
   CIDS.forEach((k) => { bank.concepts[k] = { unit: B.CONCEPTS[k].unit }; });
-  assert.deepEqual(B.CARDS.filter((c) => !C.validCard(c, bank)).map((c) => c.id), []);
+  assert.deepEqual(B.ALL_CARDS.filter((c) => !C.validCard(c, bank)).map((c) => c.id), []);
   CIDS.forEach((k) => assert.ok(B.UNITS[B.CONCEPTS[k].unit], k + " 的單元不存在"));
 });
 
 test("⑦正解位置不固定（每個位置都有正解，沒有一個位置超過一半）", () => {
-  const pos = [0, 0, 0, 0]; B.CARDS.forEach((c) => { pos[c.a]++; });
+  const pos = [0, 0, 0, 0]; B.ALL_CARDS.forEach((c) => { pos[c.a]++; });
   assert.ok(pos.slice(0, 3).every((n) => n > 0), JSON.stringify(pos));
-  assert.ok(Math.max.apply(null, pos) <= B.CARDS.length / 2, JSON.stringify(pos));
+  assert.ok(Math.max.apply(null, pos) <= B.ALL_CARDS.length / 2, JSON.stringify(pos));
 });
 
 test("⑧ FACTCHECK.md 列出每一個出處（網址與原文摘錄），每題的 src 都查得到", () => {
   const md = fs.readFileSync(path.join(__dirname, "FACTCHECK.md"), "utf8");
   const miss = Object.keys(B.SOURCES).filter((k) => md.indexOf("`" + k + "`") < 0 || md.indexOf(B.SOURCES[k].url) < 0);
   assert.deepEqual(miss, [], "FACTCHECK.md 沒寫到：" + miss.join("、"));
-  const used = new Set(B.CARDS.map((c) => c.src));
+  const used = new Set(B.ALL_CARDS.map((c) => c.src));
   const unused = Object.keys(B.SOURCES).filter((k) => !used.has(k));
   assert.deepEqual(unused, [], "SOURCES 有沒用到的出處：" + unused.join("、"));
-  const noIds = B.CARDS.filter((c) => md.indexOf(c.id) < 0).map((c) => c.id);
+  const noIds = B.ALL_CARDS.filter((c) => md.indexOf(c.id) < 0).map((c) => c.id);
   assert.deepEqual(noIds, [], "FACTCHECK.md 沒列到這些題：" + noIds.join("、"));
 });
 
 test("⑨出口題不和練習題重複（家長畫面說「這些題目在練習裡沒出現過」）", () => {
-  const qs = new Set(B.CARDS.map((c) => c.q.replace(/\s/g, "")));
+  const qs = new Set(B.ALL_CARDS.map((c) => c.q.replace(/\s/g, "")));
   assert.deepEqual(CIDS.filter((k) => qs.has(B.CONCEPTS[k].exit.replace(/\s/g, ""))), []);
 });
 
 test("⑩不寫具體條號（題目、選項、解說都不出現「第 N 條」）", () => {
-  const bad = B.CARDS.filter((c) => /第\s*[0-9０-９一二三四五六七八九十百]+\s*條/.test([c.q, c.why, c.hint].concat(c.opts, c.wrongWhy).join(" "))).map((c) => c.id);
+  const bad = B.ALL_CARDS.filter((c) => /第\s*[0-9０-９一二三四五六七八九十百]+\s*條/.test([c.q, c.why, c.hint].concat(c.opts, c.wrongWhy).join(" "))).map((c) => c.id);
   assert.deepEqual(bad, []);
 });
 
@@ -109,7 +109,7 @@ test("⑩不寫具體條號（題目、選項、解說都不出現「第 N 條�
 function claimTexts() {
   const out = [];
   const strip = (s) => String(s || "").replace(/<[^>]*>/g, " ").replace(/&[a-z#0-9]+;/g, " ");
-  B.CARDS.forEach((c) => {
+  B.ALL_CARDS.forEach((c) => {
     [c.q, c.ans, c.why, c.hint].forEach((t) => out.push([c.id, t]));
     c.wrongWhy.forEach((w, i) => { if (i !== c.a) out.push([c.id + "「" + c.opts[i] + "」的解說", w]); });
   });
@@ -215,4 +215,26 @@ test("⑭有截段（end）的影片不給「在 YouTube 開啟」；沒有截�
   const h0 = run([{ id: "abcdefghijk", title: "t", channel: "c", start: 30 }]);
   if (!/href="https:\/\/www\.youtube\.com\/watch\?v=abcdefghijk&amp;t=30"|href="https:\/\/www\.youtube\.com\/watch\?v=abcdefghijk&t=30"/.test(h0)) bad.push("沒有 end 的影片應該保留外開連結（帶 t=開始秒）：" + h0);
   assert.deepEqual(bad, []);
+});
+
+// 2026-10-18 重複題只留一題（律師：「重複是指a題可以答對，也能夠答對b或c題，那b、c題就可能是重複觀念題」）
+test("重複題合併表：被併的題存在、留下的題存在且沒被併（不接龍）、同一個觀念、寫了理由；出題＝全部扣掉被併的", () => {
+  const byId = {}; B.ALL_CARDS.forEach((c) => { byId[c.id] = c; });
+  const bad = [];
+  Object.keys(B.MERGED).forEach((id) => {
+    const m = B.MERGED[id], c = byId[id];
+    if (!c) { bad.push(id + " 不在題庫"); return; }
+    if (!Array.isArray(m.keep) || !m.keep.length || typeof m.why !== "string" || m.why.length < 8) bad.push(id + " 缺 keep／why");
+    (m.keep || []).forEach((k) => {
+      if (!byId[k]) bad.push(id + " → " + k + " 不在題庫");
+      else if (B.MERGED[k]) bad.push(id + " → " + k + " 自己也被併掉了（不能接龍）");
+      else if (byId[k].concept !== c.concept) bad.push(id + " → " + k + " 跨觀念");
+    });
+  });
+  assert.deepEqual(bad, []);
+  assert.deepEqual(B.CARDS.map((c) => c.id), B.ALL_CARDS.filter((c) => !B.MERGED[c.id]).map((c) => c.id));
+  assert.equal(B.CARDS.length, 78);
+  const n = {}; B.CARDS.forEach((c) => { n[c.concept] = (n[c.concept] || 0) + 1; });
+  const thin = Object.keys(B.CONCEPTS).filter((k) => !(n[k] >= 4)).map((k) => k + "=" + (n[k] || 0));
+  assert.deepEqual(thin, [], "每個觀念合併後至少 4 題");
 });
