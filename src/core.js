@@ -704,6 +704,9 @@
       if (old !== null) {
         var why = v1Problem(old), m = why ? null : migrateV1(old, clock(), bank);
         if (!m) { st.loadError = "MIGRATE"; st.migrateReason = why || "BAD_V1"; st.saveStatus = "blocked"; return st; }
+        // 唯讀頁不搬（Codex 審 8b894c2 B6：開頁時寫入權還沒決定，v1 搬家會繞過唯讀，交錯時蓋掉寫入頁剛存的作答）：
+        // 只在記憶體顯示搬好的樣子，拿到寫入權時 reload() 再正式搬一次（屆時磁碟若已有別頁搬好的新版，就直接讀它）
+        if (readonly()) { st.state = m; st.pendingMigrate = true; return st; }
         var w = write(m);   // 寫入成功才公布；寫不進去就封鎖，下次開啟再搬（v1 原文始終不動）
         if (w === "ok") { st.state = m; st.migrated = true; st.saveStatus = "ok"; }
         else { st.loadError = "MIGRATE"; st.migrateReason = "WRITE"; st.saveStatus = "blocked"; }
@@ -753,7 +756,11 @@
       return { ok: true, info: r.info, state: st.state };
     }
     function retry() { return st.pendingAction ? dispatch(st.pendingAction) : { ok: true, nothing: true, state: st.state }; }
-    function reload() { if (!st.loadError) refresh(); return st; }   // 唯讀頁拿到寫入權時先換成磁碟最新版
+    function reload() {   // 唯讀頁拿到寫入權時先換成磁碟最新版；開頁時延後的 v1 搬家在這裡做
+      if (st.pendingMigrate && !readonly()) { st.pendingMigrate = false; return load(); }
+      if (!st.loadError) refresh();
+      return st;
+    }
     function accepted(id) { return st.state.ops.indexOf(id) >= 0; }   // 畫面只在「這個操作 ID 真的寫進去了」才公布結果
     function discardBroken() {   // 家長明確按「清除並重新開始」：一樣先驗證、寫入成功才公布；v1 原文不動
       if (readonly() || (st.loadError !== "SCHEMA" && st.loadError !== "MIGRATE")) return false;

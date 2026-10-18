@@ -1385,3 +1385,33 @@ test("M09 跨日：昨天沒答完的回合帶著停止出新的題，今天母�
   assert.deepEqual(C.poolCards(s, cut, D).map((c) => c.id), ["k"]);
   assert.equal(C.view(s, env(cut, NOON(D))).stages["1-1"], 2, "全部見過＝長葉，與母體 1／1 一致");
 });
+
+test("M04b 開頁時寫入權還沒決定：唯讀頁不搬 v1 舊存檔（零寫入）；拿到寫入權才搬，磁碟已有別頁搬好的新版就直接讀（Codex 審 8b894c2 B6）", () => {
+  const b = bank(["s1", "s2"]);
+  const v1 = JSON.stringify({ v: 1, cards: { s1: { box: 1, streak: 1, due: "2026-10-21", seen: 1, right: 1, wrong: 0, retired: false } }, unit3: false, extra: [], prefs: { sound: true } });
+  const disk = memStorage({ [C.LS_V1]: v1 }); let owner = "A";
+  const mk = (name) => C.createStore({ storage: disk, bank: b, clock: () => NOON(D), lock: { held: () => owner === name } });
+  const B = mk("B"); B.load();
+  assert.equal(disk.writes(), 0, "唯讀頁開頁不搬家");
+  assert.equal(B.get().state.cards.s1.seen, 1, "畫面照樣看得到搬好的樣子");
+  const A = mk("A"); A.load();
+  assert.ok(disk.raw[C.LS_KEY], "寫入頁開頁就搬");
+  assert.ok(A.dispatch(op("answer", { cardId: "s2", ok: true })).ok);
+  const saved = disk.raw[C.LS_KEY], w0 = disk.writes();
+  assert.equal(B.dispatch(op("tick")).error, "READONLY");
+  assert.deepEqual([disk.raw[C.LS_KEY], disk.writes()], [saved, w0], "唯讀頁不蓋掉 A 剛存的作答");
+  owner = "B"; B.reload();
+  assert.equal(B.get().state.cards.s2.seen, 1, "接手後讀到 A 的作答，不是自己記憶體裡的 v1 搬家版");
+  assert.ok(B.dispatch(op("tick")).ok);
+  assert.equal(JSON.parse(disk.raw[C.LS_KEY]).cards.s2.seen, 1);
+});
+test("M04c 單頁：寫入權晚到（開頁時還沒拿到），拿到後 reload 才把 v1 搬進新版", () => {
+  const b = bank(["s1"]);
+  const v1 = JSON.stringify({ v: 1, cards: { s1: { box: 1, streak: 1, due: "2026-10-21", seen: 1, right: 1, wrong: 0, retired: false } }, unit3: false, extra: [], prefs: { sound: true } });
+  const disk = memStorage({ [C.LS_V1]: v1 }); let held = false;
+  const S = C.createStore({ storage: disk, bank: b, clock: () => NOON(D), lock: { held: () => held } }); S.load();
+  assert.equal(disk.raw[C.LS_KEY], undefined);
+  held = true; S.reload();
+  assert.equal(JSON.parse(disk.raw[C.LS_KEY]).cards.s1.seen, 1);
+  assert.equal(disk.raw[C.LS_V1], v1, "v1 原文不動");
+});
