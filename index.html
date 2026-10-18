@@ -432,7 +432,11 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     cwa_qa: { name: "中央氣象署：氣象常識問答集", url: "https://www.cwa.gov.tw/Data/service/notice/download/publish_20200310092437.pdf" },
     cwa_rain: { name: "中央氣象署：臺灣的雨量（專題）", url: "https://www.cwa.gov.tw/Data/service/hottopic/14277057430.pdf" },
     cwa_monthly: { name: "中央氣象署：氣候統計月平均（1991–2020）", url: "https://www.cwa.gov.tw/V8/C/C/Statistics/monthlymean.html" },
-    nfa_typhoon: { name: "內政部消防署兒童版：颱風篇", url: "https://www.nfa.gov.tw/kid/index.php?code=list&flag=detail&ids=659&article_id=1290" }
+    nfa_typhoon: { name: "內政部消防署兒童版：颱風篇", url: "https://www.nfa.gov.tw/kid/index.php?code=list&flag=detail&ids=659&article_id=1290" },
+    moe_penghu: { name: "教育部國語辭典簡編本：澎湖群島", url: "https://dict.concised.moe.edu.tw/dictView.jsp?ID=2916&q=1" },
+    moe_lanyu: { name: "教育部國語辭典簡編本：蘭嶼", url: "https://dict.concised.moe.edu.tw/dictView.jsp?ID=13741&q=1" },
+    hakka_yimin: { name: "客家委員會：挑擔奉飯啟動新埔褒忠亭義民節", url: "https://www.hakka.gov.tw/chhakka/app/data/view?module=hotnews&id=25&serno=c16dfabf-4dd9-47bd-95cf-f91e16c98e6a" },
+    law_stateco3: { name: "全國法規資料庫：國家賠償法", url: "https://law.moj.gov.tw/LawClass/LawSingle.aspx?pcode=I0020004&flno=3" }
   };
 
   function hash(s) { var h = 7; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 100003; return h; }
@@ -521,6 +525,16 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     "臺灣南邊是巴士海峽，再往南是菲律賓。", "巴士海峽在哪一邊？");
 
   /* ---------- 1c 社會規範 ---------- */
+  // 2026-10-18 依康軒 113 期中卷（彰化廣興、田中、臺南和順）補：周邊島嶼、族群文化（第一單元 113／115 同名「臺灣我的家」）
+  add("b13", "1b", "moe_penghu", "下列哪一個群島，位在臺灣海峽上？", "澎湖群島",
+    [["蘭嶼", "蘭嶼在臺灣東南方的海面上，不在臺灣海峽。"], ["琉球群島", "琉球群島在臺灣的東北方，相距約 600 公里。"]],
+    "教育部辭典：澎湖群島「位於臺灣海峽上」，由許多大小島嶼組成。", "臺灣海峽在臺灣的西邊。");
+  add("b14", "1b", "moe_lanyu", "蘭嶼位在臺灣哪一個方向的海面上？", "東南方",
+    [["西北方", "西北方是臺灣海峽、往中國大陸的方向。"], ["東北方", "東北方往琉球群島。"], ["西南方", "蘭嶼在臺灣東南邊，不是西南邊。"]],
+    "教育部辭典：蘭嶼是「位於臺灣東南海面的島嶼」。", "蘭嶼在臺東外海。");
+  add("b15", "1b", "hakka_yimin", "「挑擔奉飯」是哪一個族群的傳統文化活動？", "客家",
+    [["原住民族", "原住民族有豐年祭等祭典；挑擔奉飯是客家義民祭的儀式。"], ["新住民", "新住民來自不同國家；挑擔奉飯是傳了兩百多年的客家文化。"]],
+    "客家委員會：義民節展現逾 200 年的客家文化，例如豎燈篙、放水燈、挑擔奉飯。", "和義民節有關。");
   add("c01", "1c", "edu_norm", "什麼是社會規範？", "大家共同遵守的行為標準",
     [["只管自己的喜好", "喜好是自己的事，社會規範是大家共同的標準。"], ["只有法律才算", "道德、習俗也是社會規範。"], ["只有學校的規定", "社會規範在整個社會裡，不只學校。"]],
     "社會規範是社會大多數人有共識的共同行為標準。", "「社會」兩個字，表示是大家的。");
@@ -600,6 +614,16 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     "法律經立法院通過、總統公布，全國人民都要遵守。", "誰訂的？誰要遵守？");
 
   /* ---------- 2a 地形種類 ---------- */
+  // 2026-10-18 依康軒 113 期中卷補：國家賠償、兒少法保障對象、判刑或罰錢
+  add("d14", "1d", "law_stateco3", "下列哪一種情形，最可能依照國家賠償法請國家賠償？", "馬路施工的坑洞沒有圍起來，害人跌倒受傷",
+    [["自己不小心把手機掉進家裡的水桶", "這是自己不小心，不是公共設施有問題。"], ["上學遲到被老師提醒", "被提醒不是損害，也和公共設施無關。"], ["在自己家裡的樓梯跌倒", "自己家不是公共設施。"]],
+    "公共設施設置或管理有欠缺而害人受傷，國家要賠償。這是國家賠償法的規定。", "公共設施沒管好，害人受傷。");
+  add("d15", "1d", "law_child2", "依照兒童及少年福利與權益保障法，下列哪一位「不是」法律說的兒童或少年？", "19 歲的哥哥",
+    [["17 歲的姊姊", "12 歲以上未滿 18 歲是少年，17 歲是少年。"], ["7 歲的弟弟", "未滿 12 歲是兒童。"], ["12 歲的同學", "滿 12 歲就是少年，還是受保障的對象。"]],
+    "法律說的兒童及少年，是指未滿 18 歲的人；19 歲已經不是了。", "兒童及少年要未滿幾歲？");
+  add("d16", "1d", "law_crim320", "下列哪一種違法的行為，可能會被判刑坐牢？", "偷別人的東西",
+    [["騎機車沒戴安全帽", "沒戴安全帽是處新臺幣五百元罰鍰（罰錢），不是坐牢。"], ["機車後座的人沒戴安全帽", "也是處駕駛人罰鍰（罰錢）。"]],
+    "刑法：竊取別人的東西是竊盜罪，可以處五年以下有期徒刑（坐牢）。", "哪一個是犯罪，哪一個只是罰錢？");
   add("e01", "2a", "moe_pendi", "四周被高山或高地圍繞、中間低平的地形是？", "盆地",
     [["臺地", "臺地是頂上平坦、邊緣陡的高地。"], ["丘陵", "丘陵是起伏的地形，不是四周高中間低。"], ["山地", "山地是山岳重疊的地方。"]],
     "盆地四周被高山或高地圍繞，中間低平，像一個碗。", "想想碗的形狀。");
@@ -1335,6 +1359,16 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
   function enabledCards(state, bank) {
     return allCards(state, bank).filter(function (c) { return conceptOn(state, bank, c.concept); });
   }
+  // 2026-10-18 設計（Codex 設計者 L20261018061404-4e46e8 推薦方案③）：題庫＝完整目錄（查得到題）＋ bank.active（能不能排成新卡）。
+  // 停止出新的題不刪：她練過的照常複習到畢業；計畫、回合、補做都查得回原題；不搬成績、不複製有效日給保留題。
+  function isActive(bank, id) { return !bank.active || !!bank.active[id]; }
+  // 觀念進度、單元／觀念題數、直接闖關、小考複習的母體＝能出新卡的 ∪ 練過的 ∪ 最近一天計畫或回合裡還在用的。單純裁題不會讓「做過幾題」或植物階段倒退
+  function poolCards(state, bank) {
+    var ref = {}, last = Object.keys(state.days).sort().pop();
+    if (last) state.days[last].planIds.forEach(function (id) { ref[id] = 1; });
+    if (state.session) state.session.queue.concat(state.session.answered).forEach(function (id) { ref[id] = 1; });
+    return enabledCards(state, bank).filter(function (c) { return isActive(bank, c.id) || cardState(state, c.id).seen > 0 || ref[c.id]; });
+  }
   function cardState(state, id) { return state.cards[id] || { seen: 0, goodDays: [], blockedDay: null, due: null }; }
   function retired(cs) { return cs.goodDays.length >= 3; }
 
@@ -1352,7 +1386,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     cards.forEach(function (c) {
       var cs = cardState(state, c.id);
       if (cs.seen > 0) { if (!retired(cs) && cs.due && cs.due <= day) due.push(c.id); }
-      else fresh.push(c.id);
+      else if (isActive(bank, c.id)) fresh.push(c.id);   // 新卡只從 active 挑；練過的照到期日複習
     });
     // 考前要每張卡都至少練過一次（Codex 審 e6c7ed6：固定每天 5 張，第六單元 18 題考前排不到）：
     // 新卡配額＝max(原配額, 剩下沒練過的 ÷ 到考前還有幾天)，無條件進位。
@@ -1374,7 +1408,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
   function makeupCards(state, bank, today0, td, mk) {
     var cards = enabledCards(state, bank), n = newQuota(mk), hit = {};
     state.log.forEach(function (e) { if (e.d === td) hit[e.card] = 1; });
-    var fresh = cards.filter(function (c) { return cardState(state, c.id).seen === 0 && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
+    var fresh = cards.filter(function (c) { return cardState(state, c.id).seen === 0 && isActive(bank, c.id) && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
     if (fresh.length) return fresh.slice(0, n);
     var old = cards.filter(function (c) { var cs = cardState(state, c.id); return cs.seen > 0 && !retired(cs) && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
     return reviewOrder(state, bank, old).slice(0, n);
@@ -1448,16 +1482,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     // 只拿掉「還沒做」的：今天計畫裡未完成的、這一輪待答的。已做完的是歷史，照留——
     // 2026-10-18 題庫裁重複題後（Codex 審 g5-math-review 3751016）：原本連已完成的也刪，今天的「完成」倒退、補做被鎖，進行中的補做也失去已答紀錄而無法結算
     if (d) d.planIds = d.planIds.filter(function (id) { return ok(id) || d.doneIds.indexOf(id) >= 0; });
-    if (state.session) {
-      var se = state.session, before = se.queue.length;
-      se.queue = se.queue.filter(ok);
-      // 補做做到一半、剩下的題剛好全被拿掉：當場把已答的結算到那天（和做完補做一樣）。
-      // 不結算的話畫面沒有「繼續補做」也不會結算，再按補做還會清掉已答（Codex 審 g5-math-review 9af8526）
-      if (se.makeup && before && !se.queue.length && se.answered.length && se.day === day && se.makeup < day && !(state.days[se.makeup] && state.days[se.makeup].touched.length)) {
-        var got = claimable(state, day, se.answered);
-        if (got.length) { var cd = state.days[se.makeup] || (state.days[se.makeup] = blankDay()); cd.planIds = got.slice(); cd.doneIds = got.slice(); cd.touched = got.slice(); cd.madeUp = day; }
-      }
-    }
+    if (state.session) state.session.queue = state.session.queue.filter(ok);   // 只有完整目錄裡真的查不到的卡才拿掉（停止出新的題仍查得到，不會走到這裡）；補做一律由畫面明確送 makeupClaim 結算
   }
   // 跨午夜：日期與任務一起切換（矩陣 16、17）
   function syncSession(state, bank, day) {
@@ -1492,7 +1517,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
         if (action.kind === "makeup") {
           var mk = action.day;
           if (!isDay(mk) || mk >= today || (s.days[mk] && s.days[mk].touched.length)) return fail(state0, "MAKEUP_DAY");
-          if (!dayCompleted(day)) return fail(state0, "MAKEUP_TODAY_FIRST");
+          if (!dayCompleted(day) && remainingOf(day).length) return fail(state0, "MAKEUP_TODAY_FIRST");   // 只有今天還有沒做完的卡才擋；空計畫（沒有任務）不是完成，但也不擋補做
           var mq = makeupCards(s, bank, day, today, mk);
           if (!mq.length) {
             // 全部卡都畢業了＝以後也排不出補做卡；其餘（今天都練過）明天就有（Grok 審 1b0aebe：原本一律說「明天再來補」）
@@ -1732,7 +1757,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     });
     // 新使用者第一題就答錯時同觀念還沒有練過的卡（Codex 審 e6c7ed6）：退而用同觀念還沒練過的題，
     // 不然畫面說「換一題確認」實際卻沒有確認題，再錯也不會停下來找爸媽。
-    if (!cands.length) cands = enabledCards(s, bank).filter(function (c) { return c.concept === orig.concept && c.id !== orig.id; });
+    if (!cands.length) cands = enabledCards(s, bank).filter(function (c) { return c.concept === orig.concept && c.id !== orig.id && isActive(bank, c.id); });
     if (!cands.length) return null;
     if (wanted && cands.some(function (c) { return c.id === wanted; })) return wanted;
     var q = s.session ? s.session.queue : [];
@@ -1759,6 +1784,9 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     Object.keys(bank.concepts).forEach(function (cid) { stages[cid] = stageOf(s, bank, cid); });
     return {
       today: today, planIds: d.planIds.slice(), doneIds: d.doneIds.slice(), remainingIds: remainingOf(d),
+      // 補做已答、剩下的題沒了、那天還沒結算 ⇒ 首頁給「結算」入口（設計 T06）
+      makeupPending: (s.session && s.session.makeup && s.session.day === today && !s.session.queue.length && s.session.answered.length &&
+        !(s.days[s.session.makeup] && s.days[s.session.makeup].touched.length)) ? s.session.makeup : null,
       completed: dayCompleted(d), session: s.session, stages: stages, day: d,
       M: { cardProgress: { done: d.doneIds.length, planned: d.planIds.length }, exitPending: exitPending, extraDone: d.extraDone },
       exitLater: exitLater,
@@ -1767,7 +1795,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
   }
   // 植物階段完全由狀態派生（矩陣 26）：0 種子＝沒見過；1 發芽＝見過部分；2 長葉＝全部見過；3 開花＝出口題通過；4 結果＝出口通過且全部畢業
   function stageOf(s, bank, cid) {
-    var cards = enabledCards(s, bank).filter(function (c) { return c.concept === cid; });
+    var cards = poolCards(s, bank).filter(function (c) { return c.concept === cid; });
     if (!cards.length) return 0;
     var seen = cards.filter(function (c) { return cardState(s, c.id).seen > 0; }).length;
     var e = s.exits[cid], pass = !!e && e.status === "pass";
@@ -2040,7 +2068,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     dayKey: dayKey, isDay: isDay, addDays: addDays, diffDays: diffDays, weekday: weekday,
     validCard: validCard, blankState: blankState, reduce: reduce, view: view, endTitle: endTitle, exitList: exitList,
     checkState: checkState, decode: decode, migrateV1: migrateV1, createStore: createStore,
-    cardState: cardState, cardById: cardById, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
+    cardState: cardState, cardById: cardById, isActive: isActive, poolCards: poolCards, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
     dissolveNew: dissolveNew, dissolveAddSugar: dissolveAddSugar, dissolveAddSalt: dissolveAddSalt,
     dissolveStep: dissolveStep, dissolveRead: dissolveRead, shadowFromSun: shadowFromSun, dirName: dirName
   };
@@ -2060,10 +2088,11 @@ Object.keys(MB.CONCEPTS).forEach(function(k){var c=MB.CONCEPTS[k];CONCEPTS[k]={u
 var CIDS = Object.keys(CONCEPTS);
 var SAMPLE = "自編題（未對課本）";
 var FIGS = {};
-var BASE_CARDS = MB.CARDS;
+var BASE_CARDS = MB.ALL_GENERATED || MB.ALL_CARDS || MB.CARDS;   // 2026-10-18：完整目錄（裁掉的題仍查得到，她練過的照常複習；設計方案③）
 var ALL_CARDS = BASE_CARDS;
+var ACTIVE = {}; MB.CARDS.forEach(function(c){ACTIVE[c.id]=1;});   // 能排成新卡的題
 var MERGED = {}, ANQIN_ALSO = {};
-var BANK = {cards:ALL_CARDS, concepts:{}, figs:FIGS};
+var BANK = {cards:ALL_CARDS, active:ACTIVE, concepts:{}, figs:FIGS};
 CIDS.forEach(function(k){BANK.concepts[k]={unit:CONCEPTS[k].unit};});
 
 var ERRS = {concept:"還不懂這個觀念", reading:"看錯題目", slip:"知道但選錯了"};
@@ -2180,7 +2209,7 @@ function renderMap(){
   var box=$("#mapBox"); if(!box||!MAPX) return;
   var v=V(), t=MAPX.trail({cids:CIDS, stages:v.stages, on:conceptOn});
   // 每站做過幾題：和 stageOf 同一個母體（開放中的觀念的全部卡片，含補題區加的），seen>0＝做過
-  var prog={}; C.allCards(S(),BANK).forEach(function(c){if(!conceptOn(c.concept))return;var p=prog[c.concept]||(prog[c.concept]={n:0,seen:0});p.n++;if(C.cardState(S(),c.id).seen>0)p.seen++;});
+  var prog={}; C.poolCards(S(),BANK).forEach(function(c){if(!conceptOn(c.concept))return;var p=prog[c.concept]||(prog[c.concept]={n:0,seen:0});p.n++;if(C.cardState(S(),c.id).seen>0)p.seen++;});
   var key=JSON.stringify([t,prog]);
   // 內容沒變：不重畫；從別的畫面回來（地圖原本收著）時先拿掉動畫 class——display:none 再出現會讓 CSS 動畫重播
   if(key===mapKey&&box.firstChild){if(box.hidden)mapStill(box);showMap(true);return;}
@@ -2256,8 +2285,8 @@ function renderHome(){
   renderSide();
 }
 // 小考複習：把整個單元（或一個觀念）排成一輪；作答照規則記分、隔天照樣複習，不改今天的計畫
-function unitCards(unit){return C.allCards(S(),BANK).filter(function(c){return CONCEPTS[c.concept].unit===unit&&conceptOn(c.concept);}).map(function(c){return c.id;});}
-function setCards(unit){return C.allCards(S(),BANK).filter(function(c){return (c.set==="anqin"||ANQIN_ALSO[c.id])&&CONCEPTS[c.concept].unit===unit&&conceptOn(c.concept);}).map(function(c){return c.id;});}
+function unitCards(unit){return C.poolCards(S(),BANK).filter(function(c){return CONCEPTS[c.concept].unit===unit&&conceptOn(c.concept);}).map(function(c){return c.id;});}
+function setCards(unit){return C.poolCards(S(),BANK).filter(function(c){return (c.set==="anqin"||ANQIN_ALSO[c.id])&&CONCEPTS[c.concept].unit===unit&&conceptOn(c.concept);}).map(function(c){return c.id;});}
 // 2026-10-11 律師：「每次複習都要從頭來一遍嗎？」「當天時間夠，想要全部做完，可以嗎？」
 // ⇒ 一段 20 題（排序在 core.js reviewOrder：答錯過的→沒練過的→已經會的），做完可以馬上再練一段；也可以一次做完全部。
 var SEG=20;   // 一段 20 題：每題約 40–60 秒 [推估]，一段約 15–20 分鐘，是五年級一次坐得住的長度；不是總量上限，可以一直接著練
@@ -2336,8 +2365,9 @@ function renderCal(){
   var miss=C.missedDays(s,START,v.today), mkEl=$("#makeup");
   if(mkEl){
     var mkOn=v.session&&v.session.makeup&&v.session.queue.length&&!v.session.halted;   // 補做做到一半：只給「繼續補做」，不讓別的補做按鈕蓋掉進度
-    mkEl.innerHTML=!miss.length?'':mkOn?'<span class="small muted">'+md(v.session.makeup)+' 的補做還沒做完，按上面的「繼續補做」接著做。</span>':!v.completed?'<span class="small muted">前面有 '+miss.length+' 天沒練。今天的卡做完後，可以在這裡補做。</span>':
+    mkEl.innerHTML=!miss.length?'':mkOn?'<span class="small muted">'+md(v.session.makeup)+' 的補做還沒做完，按上面的「繼續補做」接著做。</span>':v.makeupPending?'<span class="small muted">'+md(v.makeupPending)+' 的補做已經做了 '+v.session.answered.length+' 題，還沒結算：</span><div class="row"><button class="btn ghost sm" type="button" id="goSettle">結算 '+md(v.makeupPending)+' 補做</button></div>':v.remainingIds.length?'<span class="small muted">前面有 '+miss.length+' 天沒練。今天的卡做完後，可以在這裡補做。</span>':
       '<span class="small muted">補做前面沒練的日子（每天補一份新卡）：</span><div class="row">'+miss.map(function(x){return '<button class="btn ghost sm" type="button" data-mk="'+x+'">補做 '+md(x)+'</button>';}).join("")+'</div>';
+    var gs=$("#goSettle"); if(gs) gs.onclick=function(){var v2=V();if(!v2.makeupPending){renderHome();return;}myMakeup=v2.makeupPending;renderEnd();};   // 設計 T06：補做剩下的題沒了也有結算入口；結算照舊由結束畫面送 makeupClaim
     mkEl.querySelectorAll("button[data-mk]").forEach(function(b){b.onclick=function(){lastReview=null;myMakeup=b.dataset.mk;var r=beginRound({type:"sessionStart",kind:"makeup",day:b.dataset.mk});if(!r.ok&&r.error)toast(MAKEUP_MSG[r.error]||"現在不能補做");};});
   }
   var n=0; k=v.today;
@@ -2348,7 +2378,7 @@ function renderCal(){
 function toast(t){var el=$("#main"),d=document.createElement("div");d.className="hint";d.textContent=t;el.prepend(d);setTimeout(function(){d.remove();},3500);}
 
 /* ---------- 觀念頁（概念入口） ---------- */
-function conceptCards(cid){return C.allCards(S(),BANK).filter(function(c){return c.concept===cid;}).map(function(c){return c.id;});}
+function conceptCards(cid){return C.poolCards(S(),BANK).filter(function(c){return c.concept===cid;}).map(function(c){return c.id;});}
 function renderConcept(cid){
   screen="concept"; leaveLab();
   var c=CONCEPTS[cid], v=V(), ex=EXPLAIN[cid][0];

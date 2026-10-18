@@ -1141,24 +1141,7 @@ test("V1 今天計畫已做完的卡被題庫拿掉：今天仍算完成，補�
   const r = C.reduce(s, op("sessionStart", { kind: "makeup", day: "2026-10-19" }), env(b2, NOON(D)));
   assert.notEqual(r.error, "MAKEUP_TODAY_FIRST");
 });
-test("V2 補做進行中，已答和待答的卡都被題庫拿掉：已答照留、待答移除，仍可結算", () => {
-  const b1 = bank(["p1", "m1", "m2"]), b2 = bank(["p1"]);
-  // 今天第一次操作時題庫只有 p1 ⇒ 今天計畫固定為 [p1]；做完才能補做，m1、m2 之後加入、給補做用
-  let s = run(C.blankState(), b2, NOON(D), op("answer", { cardId: "p1", ok: true }));
-  assert.equal(C.view(s, env(b1, NOON(D))).completed, true);
-  s = run(s, b1, NOON(D), op("sessionStart", { kind: "makeup", day: "2026-10-19" }));
-  const q = s.session.queue.slice();
-  assert.ok(q.length >= 2, q.join(","));
-  s = run(s, b1, NOON(D), op("answer", { cardId: q[0], ok: true }));
-  s = run(s, b2, NOON(D), op("tick"));
-  assert.deepEqual(s.session.answered, [q[0]], "已答照留");
-  assert.deepEqual(s.session.queue, [], "待答的被拿掉");
-  // 剩下的題全被拿掉＝當場結算已答的（Codex 審 g5-math-review 9af8526：否則畫面沒有「繼續補做」也不會結算）
-  assert.equal(s.days["2026-10-19"].madeUp, D);
-  assert.deepEqual(s.days["2026-10-19"].touched, [q[0]]);
-  const again = C.reduce(s, op("makeupClaim", { day: "2026-10-19", ids: [q[0]] }), env(b2, NOON(D)));
-  assert.equal(again.error, "MAKEUP_DAY", "已結算過不再重複結算");
-});
+// V2（10-18 第二輪「當場結算」）已依設計方案③作廢、改由 T06 涵蓋：清理題庫不能決定補做歸屬（Codex 設計者 L20261018061404-4e46e8）
 test("V3 一般補做：最後一題答完、題庫沒變，不會被提前結算（照舊由畫面送結算）", () => {
   const b1 = bank(["p1", "m1", "m2"]), b0 = bank(["p1"]);
   let s = run(C.blankState(), b0, NOON(D), op("answer", { cardId: "p1", ok: true }));
@@ -1168,4 +1151,89 @@ test("V3 一般補做：最後一題答完、題庫沒變，不會被提前結�
   assert.ok(!s.days["2026-10-19"] || !s.days["2026-10-19"].madeUp, "沒送結算前不得結算");
   s = run(s, b1, NOON(D), op("makeupClaim", { day: "2026-10-19", ids: s.session.answered.slice() }));
   assert.equal(s.days["2026-10-19"].madeUp, D);
+});
+
+// ===== 2026-10-18 設計方案③驗收（Codex 設計者 L20261018061404-4e46e8 矩陣 T01–T24 中核心可測的部分）=====
+// bank.cards＝完整目錄；bank.active＝能排成新卡的題。停止出新的題 x 仍在目錄裡。
+function abank(ids, active, concept) { const b = bank(ids, concept); b.active = {}; active.forEach((id) => { b.active[id] = 1; }); return b; }
+test("T01 只練過停止出新的題：觀念階段不倒退（仍是發芽），母體含練過的舊題", () => {
+  const full = bank(["x1", "x2", "k1", "k2", "k3"]), cut = abank(["x1", "x2", "k1", "k2", "k3"], ["k1", "k2", "k3"]);
+  let s = run(C.blankState(), full, NOON(D), op("answer", { cardId: "x1", ok: true }));
+  s = run(s, full, NOON(D), op("answer", { cardId: "x2", ok: true }));
+  const pool = C.poolCards(s, cut).map((c) => c.id).sort();
+  assert.deepEqual(pool, ["k1", "k2", "k3", "x1", "x2"], "練過的 x1、x2 仍在母體");
+  assert.equal(C.view(s, env(cut, NOON(D))).stages["1-1"], 1, "發芽，不是種子");
+  assert.equal(s.cards.k1, undefined, "不替保留題冒記作答（T10）");
+});
+test("T02 今天計畫做完的卡被停止出新：今天仍完成、計畫不變", () => {
+  const full = bank(["x"]), cut = abank(["x", "k"], ["k"]);
+  let s = run(C.blankState(), full, NOON(D), op("answer", { cardId: "x", ok: true }));
+  s = run(s, cut, NOON(D), op("tick"));
+  assert.deepEqual([s.days[D].planIds, s.days[D].doneIds], [["x"], ["x"]]);
+  assert.equal(C.view(s, env(cut, NOON(D))).completed, true);
+});
+test("T03／T05 停止出新的題還在回合裡：查得回、可以繼續答，tick 不會自動結算補做", () => {
+  const b0 = bank(["p1"]), full = bank(["p1", "x1", "x2"]), cut = abank(["p1", "x1", "x2"], ["p1"]);
+  let s = run(C.blankState(), b0, NOON(D), op("answer", { cardId: "p1", ok: true }));
+  s = run(s, full, NOON(D), op("sessionStart", { kind: "makeup", day: "2026-10-19" }));
+  const q = s.session.queue.slice();
+  s = run(s, full, NOON(D), op("answer", { cardId: q[0], ok: true }));
+  s = run(s, cut, NOON(D), op("tick"));
+  assert.deepEqual(s.session.queue, [q[1]], "待答的舊題保留");
+  assert.ok(!s.days["2026-10-19"], "tick 不結算");
+  s = run(s, cut, NOON(D), op("answer", { cardId: q[1], ok: true }));
+  s = run(s, cut, NOON(D), op("makeupClaim", { day: "2026-10-19", ids: s.session.answered.slice() }));
+  assert.deepEqual(s.days["2026-10-19"].touched.slice().sort(), q.slice().sort());
+});
+test("T04 舊版留下的空計畫：不猜原計畫；沒有待做任務就不擋補做", () => {
+  const b = bank(["a", "b"]); const s = C.blankState();
+  s.days[D] = { planIds: [], doneIds: [], touched: [], extraDone: false, labRuns: 0, teach: 0, mood: null };
+  const v = C.view(s, env(b, NOON(D)));
+  assert.equal(v.completed, false, "空計畫不是完成");
+  const r = C.reduce(s, op("sessionStart", { kind: "makeup", day: "2026-10-19" }), env(b, NOON(D)));
+  assert.notEqual(r.error, "MAKEUP_TODAY_FIRST");
+  assert.deepEqual(r.state.days[D].touched, [], "沒作答不寫 touched");
+});
+test("T06 補做剩下的題在目錄裡真的查不到：不自動結算；首頁有結算入口；明確結算一次、重送不重複", () => {
+  const b0 = bank(["p1"]), full = bank(["p1", "m1", "m2"]), gone = bank(["p1"]);
+  let s = run(C.blankState(), b0, NOON(D), op("answer", { cardId: "p1", ok: true }));
+  s = run(s, full, NOON(D), op("sessionStart", { kind: "makeup", day: "2026-10-19" }));
+  const q = s.session.queue.slice();
+  s = run(s, full, NOON(D), op("answer", { cardId: q[0], ok: true }));
+  s = run(s, gone, NOON(D), op("tick"));
+  assert.ok(!s.days["2026-10-19"], "tick 不結算");
+  assert.equal(C.view(s, env(gone, NOON(D))).makeupPending, "2026-10-19", "首頁有結算入口");
+  s = run(s, gone, NOON(D), op("makeupClaim", { day: "2026-10-19", ids: s.session.answered.slice() }));
+  assert.deepEqual(s.days["2026-10-19"].touched, [q[0]]);
+  assert.equal(C.view(s, env(gone, NOON(D))).makeupPending, null, "結算後入口消失");
+  assert.equal(C.reduce(s, op("makeupClaim", { day: "2026-10-19", ids: [q[0]] }), env(gone, NOON(D))).error, "MAKEUP_DAY", "重送不重複");
+});
+test("T08／T09 新卡只從 active 挑；練過、沒畢業、到期的舊題照常排進複習", () => {
+  const full = bank(["x", "k1", "k2"]), cut = abank(["x", "k1", "k2", "y"], ["k1", "k2"]);
+  let s = run(C.blankState(), full, NOON("2026-10-19"), op("answer", { cardId: "x", ok: true }));
+  const plan = C.view(s, env(cut, NOON(D))).planIds;
+  assert.ok(plan.includes("x"), "到期的舊題 x 照排");
+  assert.ok(!plan.includes("y"), "沒練過、非 active 的 y 不排成新卡");
+  assert.ok(plan.includes("k1") && plan.includes("k2"));
+  assert.deepEqual(s.cards.x.goodDays, ["2026-10-19"], "成績不因裁題改變");
+});
+test("T15 兩分頁：A 補 10/18 答一題後題被停止出新，B 換成補 10/19；tick 不替任何一天結算，只有明確請求才記", () => {
+  const b0 = bank(["p1"]), full = bank(["p1", "a1", "a2", "b1"]), cut = abank(["p1", "a1", "a2", "b1"], ["p1", "b1"]);
+  let s = run(C.blankState(), b0, NOON(D), op("answer", { cardId: "p1", ok: true }));
+  s = run(s, full, NOON(D), op("sessionStart", { kind: "makeup", day: "2026-10-18" }));
+  const a = s.session.queue[0];
+  s = run(s, full, NOON(D), op("answer", { cardId: a, ok: true }));
+  s = run(s, cut, NOON(D), op("sessionStart", { kind: "makeup", day: "2026-10-19" }));
+  s = run(s, cut, NOON(D), op("tick"));
+  assert.ok(!s.days["2026-10-18"] && !s.days["2026-10-19"], "沒有自動結算");
+  s = run(s, cut, NOON(D), op("makeupClaim", { day: "2026-10-18", ids: [a] }));
+  assert.deepEqual(s.days["2026-10-18"].touched, [a]);
+});
+test("T19 合併表刪一行（x 重新變成 active）：今天的計畫不變，明天起才排得到", () => {
+  const cut = abank(["k", "x"], ["k"]), back = bank(["k", "x"]);
+  let s = run(C.blankState(), cut, NOON(D), op("tick"));
+  assert.deepEqual(s.days[D].planIds, ["k"]);
+  s = run(s, back, NOON(D), op("tick"));
+  assert.deepEqual(s.days[D].planIds, ["k"], "今天不重開");
+  assert.ok(C.view(s, env(back, NOON("2026-10-21"))).planIds.includes("x"), "明天可出 x");
 });

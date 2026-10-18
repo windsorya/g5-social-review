@@ -60,9 +60,10 @@ test("④題目、解說、錯誤選項解說、提示：每句 ≤40 字", () =
 
 test("⑤每個觀念都有題（8～15 題），總數約 100 題；每個觀念都有解說與先想想看", () => {
   const n = {}; CIDS.forEach((k) => { n[k] = 0; });
-  B.ALL_CARDS.forEach((c) => { assert.ok(c.concept in n, c.id + " 的觀念不存在"); n[c.concept]++; });
-  const off = CIDS.filter((k) => n[k] < 8 || n[k] > 15).map((k) => k + "=" + n[k]);
-  assert.deepEqual(off, [], "題數不在 8～15：" + off.join("、"));
+  B.CARDS.forEach((c) => { assert.ok(c.concept in n, c.id + " 的觀念不存在"); n[c.concept]++; });   // 2026-10-18：上限管的是實際出題量（被併的題不出題）
+  const off = CIDS.filter((k) => n[k] < 4 || n[k] > 15).map((k) => k + "=" + n[k]);
+  CIDS.forEach((k) => assert.ok(B.ALL_CARDS.filter((c) => c.concept === k).length >= 8, k + " 全部題少於 8"));
+  assert.deepEqual(off, [], "出題數不在 4～15：" + off.join("、"));
   assert.ok(B.ALL_CARDS.length >= 90 && B.ALL_CARDS.length <= 110, "總題數 " + B.ALL_CARDS.length);
   CIDS.forEach((k) => { assert.ok(X.EXPLAIN[k] && X.EXPLAIN[k].length >= 2, k + " 缺解說"); const p = X.PREDICT[k]; assert.ok(p && p.a >= 0 && p.a < p.opts.length, k + " 缺先想想看"); });
 });
@@ -233,7 +234,7 @@ test("重複題合併表：被併的題存在、留下的題存在且沒被併�
   });
   assert.deepEqual(bad, []);
   assert.deepEqual(B.CARDS.map((c) => c.id), B.ALL_CARDS.filter((c) => !B.MERGED[c.id]).map((c) => c.id));
-  assert.equal(B.CARDS.length, 81);
+  assert.equal(B.CARDS.length, 87);
   const n = {}; B.CARDS.forEach((c) => { n[c.concept] = (n[c.concept] || 0) + 1; });
   const thin = Object.keys(B.CONCEPTS).filter((k) => !(n[k] >= 4)).map((k) => k + "=" + (n[k] || 0));
   assert.deepEqual(thin, [], "每個觀念合併後至少 4 題");

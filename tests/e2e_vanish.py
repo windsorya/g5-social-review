@@ -9,6 +9,7 @@
 """
 import datetime
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -51,7 +52,9 @@ def main():
         info = page.evaluate("""(() => { const C = window.G5Core, B = window.G5MathBank || window.G5ChiBank || window.G5SocBank, M = window.G5_MERGED || {};
           const cards = B ? B.CARDS : window.G5_EXTRA_CARDS.filter((c) => !M[c.id] && c.concept[0] !== "3");   // 自然站：加題檔裡留下的卡（第三單元預設沒開）
           const ids = cards.filter((c) => c.type === "choice").slice(0, 2);
-          return { key: C.LS_KEY, blank: C.blankState(), r1: ids[0].id, c1: ids[0].concept, r2: ids[1].id, c2: ids[1].concept, q1: ids[0].q }; })()""")
+          const all = B ? (B.ALL_GENERATED || B.ALL_CARDS || []) : window.G5_EXTRA_CARDS, act = new Set(cards.map((c) => c.id));
+          const xs = all.filter((c) => !act.has(c.id) && (B ? true : M[c.id]) && c.concept[0] !== "3");   // 停止出新、但在目錄裡的題
+          return { key: C.LS_KEY, blank: C.blankState(), x: xs.length ? xs[0].id : null, r1: ids[0].id, c1: ids[0].concept, r2: ids[1].id, c2: ids[1].concept, q1: ids[0].q }; })()""")
         ctx.close()
         r1, r2, c1, c2 = info["r1"], info["r2"], info["c1"], info["c2"]
         day = {"planIds": [r1], "doneIds": [r1], "touched": [r1], "extraDone": False, "labRuns": 0, "teach": 0, "mood": None}
@@ -74,15 +77,28 @@ def main():
         s["log"] = [entry(r1, c1, "x1"), entry(r2, c2, "x2")]
         s["session"] = {"day": TODAY, "kind": "review", "queue": ["gone"], "answered": [r2], "wrong": [], "kinds": {}, "makeup": "2026-10-18"}
         ctx, page, errors = open_page(browser, (info["key"], s))
-        page.evaluate("document.dispatchEvent(new Event('visibilitychange')); 0")
+        disk0 = json.loads(page.evaluate("localStorage.getItem(window.G5Core.LS_KEY)"))
+        check("② 剩下的補做題查不到：開頁不自動結算（設計方案③：清理題庫不決定補做歸屬）", not (disk0["days"].get("2026-10-18") or {}).get("touched"), json.dumps(disk0["days"], ensure_ascii=False)[:200])
+        btn = page.locator("#goSettle")
+        check("② 首頁有「結算 10/18 補做」入口", btn.count() == 1 and "結算 10/18 補做" in btn.inner_text(), page.inner_text("#makeup")[:200] if page.locator("#makeup").count() else "")
+        if btn.count():
+            btn.click()
         disk = json.loads(page.evaluate("localStorage.getItem(window.G5Core.LS_KEY)"))
-        shown = page.inner_text("#main")
         d = disk["days"].get("2026-10-18") or {}
-        check("② 剩下的補做題只剩被拿掉的卡：開頁後 10/18 已結算（madeUp＝今天、touched＝已答的那張）",
-              d.get("madeUp") == TODAY and d.get("touched") == [r2], json.dumps(disk["days"], ensure_ascii=False)[:300])
-        check("② 首頁沒有卡住的「繼續補做」", "繼續補做" not in shown, shown[:200])
+        check("② 按下結算才記到 10/18（madeUp＝今天、touched＝已答的那張）", d.get("madeUp") == TODAY and d.get("touched") == [r2], json.dumps(disk["days"], ensure_ascii=False)[:300])
+        check("② 結算後顯示「10/18 補做完成」", "10/18 補做完成" in page.inner_text("#main"), page.inner_text("#main")[:200])
         check("② 沒有 JS 錯誤", not errors, errors)
         ctx.close()
+
+        # ③ 她練過、現在停止出新的題（數學截取掉的變體、其他站被併的題）：地圖照算「做過 1／…」，不歸零（設計 T01）
+        if info["x"]:
+            s = json.loads(json.dumps(info["blank"]))
+            s["cards"][info["x"]] = dict(learned)
+            ctx, page, errors = open_page(browser, (info["key"], s))
+            txt = page.inner_text("#mapBox") if page.locator("#mapBox").count() else page.inner_text("body")
+            check("③ 只練過一張停止出新的題：地圖上那一站寫「1／N 題」（不是 0）", re.search(r"(^|\n)1／\d+ 題", txt) is not None, txt[:300])
+            check("③ 沒有 JS 錯誤", not errors, errors)
+            ctx.close()
         browser.close()
     print("%d/%d PASS" % (sum(results), len(results)))
     return 0 if all(results) else 1

@@ -73,6 +73,16 @@
   function enabledCards(state, bank) {
     return allCards(state, bank).filter(function (c) { return conceptOn(state, bank, c.concept); });
   }
+  // 2026-10-18 設計（Codex 設計者 L20261018061404-4e46e8 推薦方案③）：題庫＝完整目錄（查得到題）＋ bank.active（能不能排成新卡）。
+  // 停止出新的題不刪：她練過的照常複習到畢業；計畫、回合、補做都查得回原題；不搬成績、不複製有效日給保留題。
+  function isActive(bank, id) { return !bank.active || !!bank.active[id]; }
+  // 觀念進度、單元／觀念題數、直接闖關、小考複習的母體＝能出新卡的 ∪ 練過的 ∪ 最近一天計畫或回合裡還在用的。單純裁題不會讓「做過幾題」或植物階段倒退
+  function poolCards(state, bank) {
+    var ref = {}, last = Object.keys(state.days).sort().pop();
+    if (last) state.days[last].planIds.forEach(function (id) { ref[id] = 1; });
+    if (state.session) state.session.queue.concat(state.session.answered).forEach(function (id) { ref[id] = 1; });
+    return enabledCards(state, bank).filter(function (c) { return isActive(bank, c.id) || cardState(state, c.id).seen > 0 || ref[c.id]; });
+  }
   function cardState(state, id) { return state.cards[id] || { seen: 0, goodDays: [], blockedDay: null, due: null }; }
   function retired(cs) { return cs.goodDays.length >= 3; }
 
@@ -90,7 +100,7 @@
     cards.forEach(function (c) {
       var cs = cardState(state, c.id);
       if (cs.seen > 0) { if (!retired(cs) && cs.due && cs.due <= day) due.push(c.id); }
-      else fresh.push(c.id);
+      else if (isActive(bank, c.id)) fresh.push(c.id);   // 新卡只從 active 挑；練過的照到期日複習
     });
     // 考前要每張卡都至少練過一次（Codex 審 e6c7ed6：固定每天 5 張，第六單元 18 題考前排不到）：
     // 新卡配額＝max(原配額, 剩下沒練過的 ÷ 到考前還有幾天)，無條件進位。
@@ -112,7 +122,7 @@
   function makeupCards(state, bank, today0, td, mk) {
     var cards = enabledCards(state, bank), n = newQuota(mk), hit = {};
     state.log.forEach(function (e) { if (e.d === td) hit[e.card] = 1; });
-    var fresh = cards.filter(function (c) { return cardState(state, c.id).seen === 0 && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
+    var fresh = cards.filter(function (c) { return cardState(state, c.id).seen === 0 && isActive(bank, c.id) && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
     if (fresh.length) return fresh.slice(0, n);
     var old = cards.filter(function (c) { var cs = cardState(state, c.id); return cs.seen > 0 && !retired(cs) && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
     return reviewOrder(state, bank, old).slice(0, n);
@@ -186,16 +196,7 @@
     // 只拿掉「還沒做」的：今天計畫裡未完成的、這一輪待答的。已做完的是歷史，照留——
     // 2026-10-18 題庫裁重複題後（Codex 審 g5-math-review 3751016）：原本連已完成的也刪，今天的「完成」倒退、補做被鎖，進行中的補做也失去已答紀錄而無法結算
     if (d) d.planIds = d.planIds.filter(function (id) { return ok(id) || d.doneIds.indexOf(id) >= 0; });
-    if (state.session) {
-      var se = state.session, before = se.queue.length;
-      se.queue = se.queue.filter(ok);
-      // 補做做到一半、剩下的題剛好全被拿掉：當場把已答的結算到那天（和做完補做一樣）。
-      // 不結算的話畫面沒有「繼續補做」也不會結算，再按補做還會清掉已答（Codex 審 g5-math-review 9af8526）
-      if (se.makeup && before && !se.queue.length && se.answered.length && se.day === day && se.makeup < day && !(state.days[se.makeup] && state.days[se.makeup].touched.length)) {
-        var got = claimable(state, day, se.answered);
-        if (got.length) { var cd = state.days[se.makeup] || (state.days[se.makeup] = blankDay()); cd.planIds = got.slice(); cd.doneIds = got.slice(); cd.touched = got.slice(); cd.madeUp = day; }
-      }
-    }
+    if (state.session) state.session.queue = state.session.queue.filter(ok);   // 只有完整目錄裡真的查不到的卡才拿掉（停止出新的題仍查得到，不會走到這裡）；補做一律由畫面明確送 makeupClaim 結算
   }
   // 跨午夜：日期與任務一起切換（矩陣 16、17）
   function syncSession(state, bank, day) {
@@ -230,7 +231,7 @@
         if (action.kind === "makeup") {
           var mk = action.day;
           if (!isDay(mk) || mk >= today || (s.days[mk] && s.days[mk].touched.length)) return fail(state0, "MAKEUP_DAY");
-          if (!dayCompleted(day)) return fail(state0, "MAKEUP_TODAY_FIRST");
+          if (!dayCompleted(day) && remainingOf(day).length) return fail(state0, "MAKEUP_TODAY_FIRST");   // 只有今天還有沒做完的卡才擋；空計畫（沒有任務）不是完成，但也不擋補做
           var mq = makeupCards(s, bank, day, today, mk);
           if (!mq.length) {
             // 全部卡都畢業了＝以後也排不出補做卡；其餘（今天都練過）明天就有（Grok 審 1b0aebe：原本一律說「明天再來補」）
@@ -470,7 +471,7 @@
     });
     // 新使用者第一題就答錯時同觀念還沒有練過的卡（Codex 審 e6c7ed6）：退而用同觀念還沒練過的題，
     // 不然畫面說「換一題確認」實際卻沒有確認題，再錯也不會停下來找爸媽。
-    if (!cands.length) cands = enabledCards(s, bank).filter(function (c) { return c.concept === orig.concept && c.id !== orig.id; });
+    if (!cands.length) cands = enabledCards(s, bank).filter(function (c) { return c.concept === orig.concept && c.id !== orig.id && isActive(bank, c.id); });
     if (!cands.length) return null;
     if (wanted && cands.some(function (c) { return c.id === wanted; })) return wanted;
     var q = s.session ? s.session.queue : [];
@@ -497,6 +498,9 @@
     Object.keys(bank.concepts).forEach(function (cid) { stages[cid] = stageOf(s, bank, cid); });
     return {
       today: today, planIds: d.planIds.slice(), doneIds: d.doneIds.slice(), remainingIds: remainingOf(d),
+      // 補做已答、剩下的題沒了、那天還沒結算 ⇒ 首頁給「結算」入口（設計 T06）
+      makeupPending: (s.session && s.session.makeup && s.session.day === today && !s.session.queue.length && s.session.answered.length &&
+        !(s.days[s.session.makeup] && s.days[s.session.makeup].touched.length)) ? s.session.makeup : null,
       completed: dayCompleted(d), session: s.session, stages: stages, day: d,
       M: { cardProgress: { done: d.doneIds.length, planned: d.planIds.length }, exitPending: exitPending, extraDone: d.extraDone },
       exitLater: exitLater,
@@ -505,7 +509,7 @@
   }
   // 植物階段完全由狀態派生（矩陣 26）：0 種子＝沒見過；1 發芽＝見過部分；2 長葉＝全部見過；3 開花＝出口題通過；4 結果＝出口通過且全部畢業
   function stageOf(s, bank, cid) {
-    var cards = enabledCards(s, bank).filter(function (c) { return c.concept === cid; });
+    var cards = poolCards(s, bank).filter(function (c) { return c.concept === cid; });
     if (!cards.length) return 0;
     var seen = cards.filter(function (c) { return cardState(s, c.id).seen > 0; }).length;
     var e = s.exits[cid], pass = !!e && e.status === "pass";
@@ -778,7 +782,7 @@
     dayKey: dayKey, isDay: isDay, addDays: addDays, diffDays: diffDays, weekday: weekday,
     validCard: validCard, blankState: blankState, reduce: reduce, view: view, endTitle: endTitle, exitList: exitList,
     checkState: checkState, decode: decode, migrateV1: migrateV1, createStore: createStore,
-    cardState: cardState, cardById: cardById, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
+    cardState: cardState, cardById: cardById, isActive: isActive, poolCards: poolCards, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
     dissolveNew: dissolveNew, dissolveAddSugar: dissolveAddSugar, dissolveAddSalt: dissolveAddSalt,
     dissolveStep: dissolveStep, dissolveRead: dissolveRead, shadowFromSun: shadowFromSun, dirName: dirName
   };
