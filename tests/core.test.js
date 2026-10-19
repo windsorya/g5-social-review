@@ -1926,3 +1926,255 @@ test("C16 補做隔離：未結算、已有作答的補做（佇列含練過的�
   const nx = C.reduce(done, op("sessionStart", { kind: "review", ids: B12.cards.map((c) => c.id) }), env(B12, NOON(D)));
   assert.deepEqual([nx.error, nx.state.session.kind, nx.state.session.makeup, nx.state.session.pick], [undefined, "review", undefined, "fresh"], "結算後新回合真的開了（Codex 審 c07244c F2）");
 });
+
+/* ---------- F3：第 5 輪限定驗收 ----------
+ * N1：攔下 roundKeeps 對 weak／again 直接放行全部題目的錯誤實作。
+ * N2：攔下 pickVariation 對 weak／again 放行所有未做題的錯誤實作。
+ * N3：攔下 labComplete 換題卻漏寫 variation 標記的錯誤實作。
+ * CHAIN：由實驗實際產生變式，經存檔還原、續接、作答，驗證計分及做過資格。
+ *
+ * 只有 N1 刻意手工建立待清理佇列與標記，用來測續接邊界。
+ * N3 與 CHAIN 絕不手工補 variation，標記必須由核心自己產生。
+ */
+
+// N1：續接資格上限與普通／變式標記無關。
+// 注意：這裡測「續接」，不是 weak 開局選題；依題定契約應保留 u。
+for (const pick of ["weak", "again"]) {
+  for (const marked of [false, true]) {
+    test(
+      `F3-N1 ${pick}／${marked ? "variation" : "普通"}：續接精確排除不合格題`,
+      () => {
+        // 要擋：roundKeeps 在 weak／again 直接 return true。
+        const b = {
+          cards: [
+            card("t"), card("g"), card("x"), card("u"), card("w")
+          ],
+          concepts: CONCEPTS,
+          figs: FIGS,
+          active: { t: 1, g: 1, u: 1, w: 1 }
+        };
+
+        let s = C.blankState();
+        s = run(s, b, NOON("2026-10-15"),
+          op("answer", { cardId: "g", ok: true }));
+        s = run(s, b, NOON("2026-10-18"),
+          op("answer", { cardId: "g", ok: true }));
+        s = run(s, b, NOON("2026-10-19"),
+          op("answer", { cardId: "w", ok: false }));
+        s = run(s, b, NOON(D),
+          op("answer", { cardId: "t", ok: false }));
+
+        // t：今日已答；g：已學會；x：停出未做；
+        // u：可用未做；w：待加強且今日未答。
+        s.session = {
+          day: D,
+          kind: "review",
+          pick,
+          queue: ["t", "g", "x", "u", "w"],
+          answered: [],
+          wrong: [],
+          kinds: {}
+        };
+
+        if (marked) {
+          for (const id of s.session.queue) {
+            s.session.kinds[id] = "variation";
+          }
+        }
+
+        assert.deepEqual(C.checkState(s, b), [],
+          "前置：待清理佇列仍須符合狀態結構");
+
+        const expected = pick === "weak"
+          ? ["u", "w"]
+          : ["g", "u", "w"];
+
+        // 分別使用獨立副本，避免 view 的結果掩蓋 tick 的漏洞。
+        const viewed = C.view(
+          JSON.parse(JSON.stringify(s)),
+          env(b, NOON(D))
+        );
+        assert.deepEqual(viewed.session.queue, expected,
+          "view 必須依資格過濾，不能因模式或標記全部放行");
+
+        const ticked = run(
+          JSON.parse(JSON.stringify(s)),
+          b,
+          NOON(D),
+          op("tick")
+        );
+        assert.deepEqual(ticked.session.queue, expected,
+          "tick 必須真正清理存續佇列，不能只讓畫面看起來正確");
+
+        if (marked) {
+          for (const id of expected) {
+            assert.equal(viewed.session.kinds[id], "variation",
+              "view 保留合格題時不得抹掉計分標記：" + id);
+            assert.equal(ticked.session.kinds[id], "variation",
+              "tick 保留合格題時不得抹掉計分標記：" + id);
+          }
+        }
+      }
+    );
+  }
+}
+
+// N2：自動選題及指定不合格 variationId，都不能繞過 active 資格。
+for (const pick of ["weak", "again"]) {
+  for (const wanted of [undefined, "x"]) {
+    test(
+      `F3-N2 ${pick}／${wanted ? "指定停出 x" : "自動選題"}：跳過停出未做題`,
+      () => {
+        // 要擋：pickVariation 把 weak／again 的所有未做題視為合格。
+        // x 故意排在 u 前面；兩者均未做，不能靠熟悉度排序避開 x。
+        const b = {
+          cards: [card("o"), card("x"), card("u")],
+          concepts: CONCEPTS,
+          figs: FIGS,
+          active: { o: 1, u: 1 }
+        };
+
+        let s = C.blankState();
+        s = run(s, b, NOON("2026-10-19"),
+          op("answer", { cardId: "o", ok: false }));
+        s = run(s, b, NOON(D),
+          op("sessionStart", {
+            kind: "review", ids: ["o"], pick
+          }));
+        assert.deepEqual(s.session.queue, ["o"]);
+
+        s = run(s, b, NOON(D),
+          op("answer", { cardId: "o", ok: false }));
+        assert.deepEqual(s.session.queue, [],
+          "前置：佇列沒有現成候選，必須從題庫挑選");
+
+        const r = cLab(C, s, b, "o", wanted);
+
+        assert.deepEqual(
+          [r.info.variation, r.state.session.queue],
+          ["u", ["u"]],
+          "必須挑可用未做 u；停出 x 即使被指定也不能入選"
+        );
+      }
+    );
+  }
+}
+
+// N3：單獨鎖住「實驗完成時產生標記」這個責任。
+for (const pick of ["fresh", "weak", "again"]) {
+  test(`F3-N3 ${pick}：實驗換入題由核心寫入 variation 標記`, () => {
+    // 要擋：labComplete 插入 v、回報 v，卻省略 kinds[v] 的賦值。
+    const b = bank(["o", "v"]);
+    let s = C.blankState();
+
+    if (pick !== "fresh") {
+      s = run(s, b, NOON("2026-10-19"),
+        op("answer", { cardId: "o", ok: false }));
+    }
+
+    s = run(s, b, NOON(D),
+      op("sessionStart", {
+        kind: "review", ids: ["o"], pick
+      }));
+    assert.deepEqual(s.session.queue, ["o"]);
+
+    s = run(s, b, NOON(D),
+      op("answer", { cardId: "o", ok: false }));
+
+    // 透過實際實驗動作換題，不在測試中補寫 kinds。
+    const r = cLab(C, s, b, "o", "v");
+
+    assert.deepEqual(
+      [r.info.variation, r.state.session.queue],
+      ["v", ["v"]],
+      "前置：實驗確實換入 v"
+    );
+    assert.equal(
+      r.state.session.kinds.v,
+      "variation",
+      "換題成立時就必須留下計分標記，不能等畫面或測試補寫"
+    );
+  });
+}
+
+// 完整鏈路：答錯 → 實驗完成 → 換題 → 存檔還原 → 續接 → 答對。
+for (const pick of ["fresh", "weak", "again"]) {
+  test(`F3-CHAIN ${pick}：實驗換題後作答，計分與做過資格一致`, () => {
+    // 要擋：
+    // 1. labComplete 漏寫 variation，卻因只驗佇列而過關。
+    // 2. decode／view／tick 弄丟標記，導致作答時被當普通題。
+    // 3. 計分忽略 variation，把答對變式算成有效日。
+    // 4. 變式作答未被記成做過，下一個 fresh 回合又出同題。
+    const b = bank(["o", "v", "n"]);
+    let s = C.blankState();
+
+    if (pick !== "fresh") {
+      s = run(s, b, NOON("2026-10-19"),
+        op("answer", { cardId: "o", ok: false }));
+    }
+
+    s = run(s, b, NOON(D),
+      op("sessionStart", {
+        kind: "review", ids: ["o"], pick
+      }));
+    assert.deepEqual(s.session.queue, ["o"]);
+
+    s = run(s, b, NOON(D),
+      op("answer", { cardId: "o", ok: false }));
+    assert.deepEqual(s.session.queue, []);
+
+    const completed = cLab(C, s, b, "o", "v");
+    assert.deepEqual(
+      [completed.info.variation, completed.state.session.queue],
+      ["v", ["v"]],
+      "實驗完成後確實換入 v"
+    );
+
+    // 不手工補標記，直接讓真正產生的狀態走過還原與續接。
+    s = viaJSON(C, completed.state, b);
+    assert.deepEqual(
+      C.view(s, env(b, NOON(D))).session.queue,
+      ["v"],
+      "存檔還原後，畫面仍應保留合格變式"
+    );
+
+    s = run(s, b, NOON(D), op("tick"));
+    assert.deepEqual(s.session.queue, ["v"],
+      "tick 後仍保留同一題，不能靠換成其他題掩蓋問題");
+
+    const answered = C.reduce(
+      s,
+      op("answer", { cardId: "v", ok: true }),
+      env(b, NOON(D))
+    );
+    assert.ok(!answered.error,
+      "變式作答不得失敗：" + answered.error);
+
+    const last = answered.state.log[answered.state.log.length - 1];
+    assert.ok(last, "作答必須留下紀錄");
+
+    // 直接驗最終計分，不只驗「有換題」或 kinds 欄位。
+    assert.deepEqual(
+      [
+        answered.info.variation,
+        answered.state.cards.v.seen,
+        answered.state.cards.v.goodDays,
+        last.variation
+      ],
+      [true, 1, [], true],
+      "變式答對算做過一次，但不取得有效日；回報及紀錄皆須標為變式"
+    );
+
+    // n 是仍未做的新題，避免空回合錯誤掩蓋 fresh 的排除結果。
+    const next = run(
+      answered.state,
+      b,
+      NOON(D),
+      op("sessionStart", {
+        kind: "review", ids: ["v", "n"], pick: "fresh"
+      })
+    );
+    assert.deepEqual(next.session.queue, ["n"],
+      "任何模式答過 v 後，fresh 只能留下仍未做的 n");
+  });
+}
