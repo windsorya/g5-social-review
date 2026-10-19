@@ -2212,3 +2212,45 @@ for (const pick of ["fresh", "weak", "again"]) {
     });
   }
 }
+
+/* ---------- F3-R3／R4／R5（Codex 第 6 輪列的測試缺口）：畫面實際作答會帶 variation:true（ui.variation）；
+ * 只有換入的 v 標成變式、同佇列的普通題 n 照常計分；變式作答的完整狀態（次數、原有有效日、到期日）逐欄核對。 */
+for (const pick of ["fresh", "weak", "again"]) {
+  for (const flag of ["省略", "帶 true"]) {
+    test(`F3-R3 ${pick}／作答${flag} variation：變式照變式計分，n 不被誤標且照常計分`, () => {
+      const b = { cards: [card("o"), card("v"), card("n", "1-2")], concepts: CONCEPTS, figs: FIGS };
+      let s = C.blankState();
+      if (pick !== "fresh") { ["o", "n"].forEach((id) => { s = run(s, b, NOON("2026-10-19"), op("answer", { cardId: id, ok: false })); }); }
+      s = run(s, b, NOON(D), op("sessionStart", { kind: "review", ids: ["o", "n"], pick }));
+      s = run(s, b, NOON(D), op("answer", { cardId: "o", ok: false }));
+      const r = cLab(C, s, b, "o");
+      assert.deepEqual([r.state.session.queue, r.state.session.kinds], [["v", "n"], { v: "variation" }], "R4：只有換入的 v 有標記");
+      let t = run(viaJSON(C, r.state, b), b, NOON(D), op("tick"));
+      const a = C.reduce(t, op("answer", Object.assign({ cardId: "v", ok: true }, flag === "帶 true" ? { variation: true } : {})), env(b, NOON(D)));
+      assert.ok(!a.error, a.error);
+      assert.deepEqual([a.info.variation, a.state.cards.v.goodDays, a.state.log[a.state.log.length - 1].variation], [true, [], true], "R3：變式答對不記有效日");
+      const n = C.reduce(a.state, op("answer", { cardId: "n", ok: true }), env(b, NOON(D)));
+      assert.deepEqual([n.info.variation, n.state.cards.n.goodDays, n.state.log[n.state.log.length - 1].variation], [false, [D], false], "R4：普通題 n 照常記有效日");
+    });
+  }
+}
+
+test("F3-R5 變式作答的完整狀態：沒做過的、做過答錯的、已學會的候選，次數＋1、原有有效日保留、到期日照規則", () => {
+  const cases = [
+    { pick: "fresh", pre: [], after: { seen: 1, goodDays: [], blockedDay: null, due: "2026-10-21" } },
+    { pick: "weak", pre: [["2026-10-19", false]], after: { seen: 2, goodDays: [], blockedDay: "2026-10-19", due: "2026-10-20" } },
+    { pick: "again", pre: [["2026-10-15", true], ["2026-10-18", true]], after: { seen: 3, goodDays: ["2026-10-15", "2026-10-18"], blockedDay: null, due: null } },
+  ];
+  cases.forEach(({ pick, pre, after }) => {
+    const b = { cards: [card("o"), card("v")], concepts: CONCEPTS, figs: FIGS };
+    let s = C.blankState();
+    if (pick !== "fresh") s = run(s, b, NOON("2026-10-19"), op("answer", { cardId: "o", ok: false }));
+    pre.forEach(([d, ok]) => { s = run(s, b, NOON(d), op("answer", { cardId: "v", ok })); });
+    s = run(s, b, NOON(D), op("sessionStart", { kind: "review", ids: ["o"], pick }));
+    s = run(s, b, NOON(D), op("answer", { cardId: "o", ok: false }));
+    const r = cLab(C, s, b, "o");
+    assert.equal(r.info.variation, "v", pick + "：前置換入 v");
+    const a = run(r.state, b, NOON(D), op("answer", { cardId: "v", ok: true, variation: true }));
+    assert.deepEqual(a.cards.v, after, pick);
+  });
+});
