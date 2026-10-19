@@ -1371,18 +1371,18 @@ test("T02 今天計畫做完的卡被停止出新：今天仍完成、計畫不�
   assert.deepEqual([s.days[D].planIds, s.days[D].doneIds], [["x"], ["x"]]);
   assert.equal(C.view(s, env(cut, NOON(D))).completed, true);
 });
-test("T03／T05 停止出新的題還在回合裡：查得回、可以繼續答，tick 不會自動結算補做", () => {
+test("T03／T05 停止出新、還沒做過的題在補做回合裡（#3010 改：續接時不再出，範圍停出的題孩子不該再碰到）；已作答的照留、tick 不自動結算、明確結算只記已答的", () => {
   const b0 = bank(["p1"]), full = bank(["p1", "x1", "x2"]), cut = abank(["p1", "x1", "x2"], ["p1"]);
   let s = run(C.blankState(), b0, NOON(D), op("answer", { cardId: "p1", ok: true }));
   s = run(s, full, NOON(D), op("sessionStart", { kind: "makeup", day: "2026-10-19" }));
   const q = s.session.queue.slice();
   s = run(s, full, NOON(D), op("answer", { cardId: q[0], ok: true }));
   s = run(s, cut, NOON(D), op("tick"));
-  assert.deepEqual(s.session.queue, [q[1]], "待答的舊題保留");
+  assert.deepEqual([s.session.queue, s.session.answered], [[], [q[0]]], "停出未做的不再出；已答的照留");
   assert.ok(!s.days["2026-10-19"], "tick 不結算");
-  s = run(s, cut, NOON(D), op("answer", { cardId: q[1], ok: true }));
+  assert.equal(C.view(s, env(cut, NOON(D))).makeupPending, "2026-10-19", "補做轉成待結算，首頁有結算入口");
   s = run(s, cut, NOON(D), op("makeupClaim", { answerDay: D, day: "2026-10-19", ids: s.session.answered.slice() }));
-  assert.deepEqual(s.days["2026-10-19"].touched.slice().sort(), q.slice().sort());
+  assert.deepEqual(s.days["2026-10-19"].touched, [q[0]]);
 });
 test("T04 舊版留下的空計畫：不猜原計畫；沒有待做任務就不擋補做", () => {
   const b = bank(["a", "b"]); const s = C.blankState();
@@ -2253,4 +2253,76 @@ test("F3-R5 變式作答的完整狀態：沒做過的、做過答錯的、已�
     const a = run(r.state, b, NOON(D), op("answer", { cardId: "v", ok: true, variation: true }));
     assert.deepEqual(a.cards.v, after, pick);
   });
+});
+
+/* ---------- #3010（社會站 cf08dd8 的 Codex P1）＋F4（Codex 審 b7bfddf）＋kind:"out" 連到期複習也停（#2997 拍板）----------
+ * servable＝查得到、不是考不到的；沒做過的要還在出新。每日計畫回合、只做 3 張、補做續接、今天剩幾張／完成了沒都只算它；
+ * 做不了的計畫題列為 missingIds（不用做），計畫本身不刪；結束標題與首頁同一句「今天能做的卡片都做完了」。 */
+test("X1 #3010 改版當天已排進計畫的停出未做題：計畫回合與只做 3 張都不出；其餘做完當天算完成、標「能做的」、列不用做", () => {
+  const ids = ["a1", "a2", "a3", "a4", "a5"];
+  const old = bank(ids), cut = { cards: ids.map((id) => card(id)), concepts: CONCEPTS, figs: FIGS, active: { a1: 1, a3: 1, a4: 1, a5: 1 } };
+  let s = run(C.blankState(), old, NOON(D), op("tick"));
+  assert.deepEqual(s.days[D].planIds, ids, "前置：舊題庫排好今天的計畫");
+  assert.deepEqual(run(s, cut, NOON(D), op("sessionStart", { size: 3 })).session.queue, ["a1", "a3", "a4"], "只做 3 張不出 a2");
+  s = run(s, cut, NOON(D), op("sessionStart", {}));
+  assert.deepEqual(s.session.queue, ["a1", "a3", "a4", "a5"], "計畫回合不出 a2");
+  ["a1", "a3", "a4", "a5"].forEach((id) => { s = run(s, cut, NOON(D), op("answer", { cardId: id, ok: true })); });
+  const v = C.view(s, env(cut, NOON(D)));
+  assert.deepEqual([v.completed, v.planStatus, v.remainingIds, v.missingIds, C.endTitle(v)], [true, "complete_missing", [], ["a2"], "今天能做的卡片都做完了"]);
+  assert.deepEqual(s.days[D].planIds, ids, "計畫本身不刪");
+});
+
+test("X2 F4 題庫真的查不到的計畫題：結束標題同首頁「今天能做的卡片都做完了」；停輪仍優先", () => {
+  const full = bank(["k", "x"]), only = bank(["k"]);
+  let s = run(C.blankState(), full, NOON(D), op("tick"));
+  s = run(s, only, NOON(D), op("sessionStart", {}));
+  s = run(s, only, NOON(D), op("answer", { cardId: "k", ok: true }));
+  const v = C.view(s, env(only, NOON(D)));
+  assert.deepEqual([v.planStatus, v.missingIds, C.endTitle(v)], ["complete_missing", ["x"], "今天能做的卡片都做完了"]);
+  assert.equal(C.endTitle(Object.assign({}, v, { session: Object.assign({}, v.session, { halted: true }) })), "這一輪先停在這裡");
+  const ok = C.view(run(run(C.blankState(), only, NOON(D), op("tick")), only, NOON(D), op("answer", { cardId: "k", ok: true })), env(only, NOON(D)));
+  assert.equal(C.endTitle(ok), "今天的卡片都做完了", "沒有做不了的題：原句");
+});
+
+test("X3 kind:out（考不到）：做過的也不排到期複習、不進小考複習／再練答錯的；今天計畫裡的算不用做；做過幾題不倒退", () => {
+  const ids = ["o", "w", "n"];
+  const b = { cards: ids.map((id) => card(id)), concepts: CONCEPTS, figs: FIGS, active: { w: 1, n: 1 }, out: { o: 1 } };
+  const before = bank(ids);
+  let s = C.blankState();
+  s = run(s, before, NOON("2026-10-19"), op("answer", { cardId: "o", ok: false }));   // 停出前她答錯過 o（到期 10-20）
+  s = run(s, before, NOON("2026-10-19"), op("answer", { cardId: "w", ok: false }));
+  let t = run(s, before, NOON(D), op("tick"));
+  assert.ok(t.days[D].planIds.includes("o"), "前置：停出前排好的計畫含 o");
+  t = run(t, b, NOON(D), op("sessionStart", {}));
+  assert.ok(!t.session.queue.includes("o"), "計畫回合不出 o");
+  const nx = run(s, b, NOON(D), op("tick"));
+  assert.ok(!nx.days[D].planIds.includes("o"), "新排的計畫不含 o 的到期複習");
+  ["weak", "again"].forEach((pick) => {
+    const r = C.reduce(s, op("sessionStart", { kind: "review", ids, pick }), env(b, NOON(D)));
+    assert.ok(!r.state.session || !r.state.session.queue.includes("o"), pick);
+  });
+  const rd = C.reduce(s, op("sessionStart", { kind: "redo", ids: ["o", "w"] }), env(b, NOON(D)));
+  assert.deepEqual(C.view(rd.state, env(b, NOON(D))).session.queue, ["w"], "再練答錯的也不出 o");
+  const c = C.reviewCounts(s, b, ids, D);
+  assert.deepEqual([c.seen, c.weak, c.weakNow], [2, 1, 1], "o 仍算做過（不倒退），但不算待加強");
+});
+
+test("X4 停出但不是 out（挑戰題／重複題）：做過的照常到期複習、計畫回合照出", () => {
+  const ids = ["c", "n"];
+  const b = { cards: ids.map((id) => card(id)), concepts: CONCEPTS, figs: FIGS, active: { n: 1 } };
+  let s = run(C.blankState(), bank(ids), NOON("2026-10-19"), op("answer", { cardId: "c", ok: false }));
+  s = run(s, b, NOON(D), op("sessionStart", {}));
+  assert.ok(s.days[D].planIds.includes("c") && s.session.queue.includes("c"), "c 照常到期複習");
+});
+
+test("X5 每日練習的補救換題不選 out 題", () => {
+  const b = { cards: [card("p"), card("o"), card("q")], concepts: CONCEPTS, figs: FIGS, active: { p: 1, q: 1 }, out: { o: 1 } };
+  let s = C.blankState();
+  ["o", "q"].forEach((id) => { s = run(s, bank(["p", "o", "q"]), NOON("2026-10-19"), op("answer", { cardId: id, ok: false })); });
+  s = run(s, b, NOON(D), op("sessionStart", {}));
+  assert.deepEqual(s.session.queue, ["p", "q"], "前置：今天計畫 p（新）、q（到期）；o 是 out 不排");
+  s = run(s, b, NOON(D), op("answer", { cardId: "q", ok: true }));   // q 先答對離開佇列（有效日 1 個），o 比 q 不熟
+  s = run(s, b, NOON(D), op("answer", { cardId: "p", ok: false }));
+  const r = cLab(C, s, b, "p");
+  assert.equal(r.info.variation, "q", "不選 out 的 o（它更不熟、不擋就會被挑中）");
 });

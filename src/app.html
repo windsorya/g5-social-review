@@ -335,7 +335,9 @@ var BASE_CARDS = MB.ALL_GENERATED || MB.ALL_CARDS || MB.CARDS;   // 2026-10-18�
 var ALL_CARDS = BASE_CARDS;
 var ACTIVE = {}; MB.CARDS.forEach(function(c){ACTIVE[c.id]=1;});   // 能排成新卡的題
 var MERGED = {}, ANQIN_ALSO = {};
-var BANK = {cards:ALL_CARDS, active:ACTIVE, concepts:{}, figs:FIGS};
+// 考不到的題（範圍稽核 kind:"out"；#2997 拍板、#3010）：不排新卡、也不排到期複習、不進任何回合；核心讀 BANK.out。挑戰題（challenge）不在此列
+var OUT = {}; (function(R){Object.keys(R).forEach(function(id){if(R[id]&&R[id].kind==="out")OUT[id]=1;});})((typeof MB!=="undefined"&&MB.RETIRED)||window.G5_RETIRED||{});
+var BANK = {cards:ALL_CARDS, active:ACTIVE, out:OUT, concepts:{}, figs:FIGS};
 CIDS.forEach(function(k){BANK.concepts[k]={unit:CONCEPTS[k].unit};});
 
 var ERRS = {concept:"還不懂這個觀念", reading:"看錯題目", slip:"知道但選錯了"};
@@ -527,7 +529,7 @@ function renderHome(){
     h='<div class="done"><b class="t">今天沒有排定卡片</b><p class="muted" style="margin:0">可以點下面的觀念看解說，或「考考爸媽」。</p>'+cont+'<div class="row" style="justify-content:center"><button class="btn ghost" type="button" id="goTeach">考考爸媽</button></div></div>';
   }else if(v.completed){
     // complete_missing：計畫裡有題目後來被拿出題庫（做不了），只報實際做完幾張，不說「全部完成」（Codex 審 8364a83 T23）
-    var doneMsg=v.planStatus==="complete_missing"?'今天做完 '+v.doneIds.length+' 張；另有 '+v.missingIds.length+' 張題目已不在題庫，不用做。':'今天 '+v.M.cardProgress.planned+' 張全部完成。';
+    var doneMsg=v.planStatus==="complete_missing"?'今天做完 '+v.doneIds.length+' 張；另有 '+v.missingIds.length+' 張題目已停出或不在題庫，不用做。':'今天 '+v.M.cardProgress.planned+' 張全部完成。';
     h='<div class="done"><b class="t">'+(v.planStatus==="complete_missing"?'今天能做的卡片都做完了':'今天的卡片都做完了')+'</b><p class="muted" style="margin:0">'+doneMsg+'想加碼可以看觀念解說、考考爸媽'+(se&&redoIds(se).length?'，或再練答錯的卡':'')+'。</p>'+cont+
       '<div class="row" style="justify-content:center">'+(se&&redoIds(se).length?'<button class="btn ghost" type="button" id="goRedo">再練答錯的 '+redoIds(se).length+' 張</button>':'')+'<button class="btn ghost" type="button" id="goTeach">考考爸媽</button></div></div>';
   }else{
@@ -922,7 +924,7 @@ function renderEnd(){
   var title=mkDone&&dd&&dd.madeUp?md(se.makeup)+(se.halted?" 補做先算到這裡":" 補做完成"):(C.endTitle(v)||"這一輪完成了"), right=se.answered.length-se.wrong.length;
   el.innerHTML='<div class="done"><b class="t">'+esc(title)+'</b>'+(mkMsg?'<p class="muted" style="margin:0">'+esc(mkMsg)+'</p>':'')+
     '<p style="margin:0">這一輪做了 '+se.answered.length+' 張'+(se.answered.length?'，第一次就答對 '+Math.max(0,right)+' 張':'')+'。</p>'+
-    (v.completed?'':v.planIds.length?'<p class="muted" style="margin:0">今天的卡片完成 '+v.M.cardProgress.done+' / '+v.M.cardProgress.planned+' 張，還有 '+v.remainingIds.length+' 張，等一下想做再按開始。</p>':'')+
+    (v.completed?(v.planStatus==="complete_missing"?'<p class="muted" style="margin:0">今天能做的都做完了；另有 '+v.missingIds.length+' 張題目已停出或不在題庫，不用做。</p>':''):v.planIds.length?'<p class="muted" style="margin:0">今天的卡片完成 '+v.M.cardProgress.done+' / '+v.M.cardProgress.planned+' 張，還有 '+v.remainingIds.length+' 張，等一下想做再按開始。</p>':'')+
     '<div class="row" style="justify-content:center">'+(!v.completed&&v.remainingIds.length?'<button class="btn" type="button" id="goMore">繼續做剩下的 '+v.remainingIds.length+' 張</button>':'')+
     (redoIds(se).length?'<button class="btn ghost" type="button" id="goRedo">再練答錯的 '+redoIds(se).length+' 張</button>':'')+
     '<button class="btn ghost" type="button" id="goTeach">考考爸媽</button><button class="btn ghost" type="button" id="goHome">回首頁</button></div>'+

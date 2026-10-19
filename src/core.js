@@ -77,6 +77,13 @@
   // 停止出新的題不刪：她練過的照常複習到畢業；計畫、回合、補做都查得回原題；不搬成績、不複製有效日給保留題。
   // 不在內建目錄裡的卡（家長匯入的題）一律可排成新卡（Codex 審 4d71855：原寫法把合法匯入題排除在計畫與進度外）
   function isActive(bank, id) { return !bank.active || !!bank.active[id] || !bank.cards.some(function (c) { return c.id === id; }); }
+  // 考不到的題（bank.out＝範圍稽核 kind:"out"；2026-10-19 #2997 拍板、#3010）：不排新卡、不排到期複習、不進任何回合；目錄與作答紀錄照留（做過幾題不倒退）
+  function isOut(bank, id) { return !!(bank.out && bank.out[id]); }
+  // 每日計畫回合、再練答錯的、補做續接、今天剩幾張／完成了沒共用（#3010）：查得到、不是考不到的；沒做過的要還在出新（isActive）。做過的照常（到期複習）
+  function servable(state, bank, id) {
+    if (!cardById(state, bank, id) || isOut(bank, id)) return false;
+    return cardState(state, id).seen > 0 || isActive(bank, id);
+  }
   // 觀念進度、單元／觀念題數、直接闖關、小考複習的母體＝能出新卡的 ∪ 練過的 ∪ 最近一天計畫或回合裡還在用的。單純裁題不會讓「做過幾題」或植物階段倒退
   // day＝今天（Codex 審 4d71855：原取「最後一天」，昨天沒答的舊題會混進今天的母體，和階段不一致）
   function poolCards(state, bank, day) {
@@ -105,7 +112,7 @@
     var cards = enabledCards(state, bank), due = [], fresh = [];
     cards.forEach(function (c) {
       var cs = cardState(state, c.id);
-      if (cs.seen > 0) { if (!retired(cs) && cs.due && cs.due <= day) due.push(c.id); }
+      if (cs.seen > 0) { if (!retired(cs) && cs.due && cs.due <= day && !isOut(bank, c.id)) due.push(c.id); }   // 考不到的題連到期複習也停（#3010）
       else if (isActive(bank, c.id)) fresh.push(c.id);   // 新卡只從 active 挑；練過的照到期日複習
     });
     // 考前要每張卡都至少練過一次（Codex 審 e6c7ed6：固定每天 5 張，第六單元 18 題考前排不到）：
@@ -172,9 +179,10 @@
   }
   function remainingOf(d) { return d.planIds.filter(function (id) { return d.doneIds.indexOf(id) < 0; }); }
   // 計畫一律不刪（Codex 設計者 T23）；但目錄裡真的查不到的題做不了，畫面上的「還要做」與「完成」只看查得到的（舊 D4：不留永遠做不完的計畫）。查不到的列為 missingIds（資料缺口）
-  function liveRemaining(s, bank, d) { return remainingOf(d).filter(function (id) { return !!cardById(s, bank, id); }); }
+  // #3010：做不了的計畫題（查不到、考不到、停出未做）一樣不算「還要做」，列為 missingIds（不用做）；計畫本身照舊不刪
+  function liveRemaining(s, bank, d) { return remainingOf(d).filter(function (id) { return servable(s, bank, id); }); }
   // 完成＝有計畫、查得到的都做完，而且計畫不是只剩「查不到又沒做」的題（做完後才從目錄消失的照樣算完成）
-  function completedIn(s, bank, d) { return !!d && d.planIds.some(function (id) { return d.doneIds.indexOf(id) >= 0 || !!cardById(s, bank, id); }) && !liveRemaining(s, bank, d).length; }
+  function completedIn(s, bank, d) { return !!d && d.planIds.some(function (id) { return d.doneIds.indexOf(id) >= 0 || servable(s, bank, id); }) && !liveRemaining(s, bank, d).length; }
 
   // 三單元交錯期：同一份計畫，改成輪流出不同概念（不隨機，重載後順序不變）
   function sessionOrder(state, bank, day, ids) {
@@ -235,7 +243,7 @@
   // 查得到、觀念開放；沒做過的只出還在出新的（isActive）；做過的：fresh 不出，weak／again 今天練過的不出，weak 只出待加強的
   function allowedIn(state, bank, id, pick, day) {
     var c = cardById(state, bank, id);
-    if (!c || !conceptOn(state, bank, c.concept)) return false;
+    if (!c || !conceptOn(state, bank, c.concept) || isOut(bank, id)) return false;
     var cs = cardState(state, id);
     if (!cs.seen) return isActive(bank, id);
     if (pick === "fresh" || touchedOn(state, day).indexOf(id) >= 0) return false;
@@ -253,7 +261,7 @@
   // 補做回合（makeup）、每日練習、再練答錯的不動。只篩待答佇列，不動 answered／wrong／cards／days。
   // reduce 與 view 都先跑 pruneVanished，所以首頁「繼續小考複習（還有 N 題）」與作答畫面一致
   function roundKeeps(state, bank, se, id, day) {
-    if (se.kind !== "review" || se.makeup) return true;
+    if (se.kind !== "review" || se.makeup) return servable(state, bank, id);   // 每日計畫、再練答錯的、補做：考不到的與停出未做的不排，做過的照常（#3010）
     return allowedIn(state, bank, id, se.pick || "fresh", day);
   }
   // 畫面題數：fresh／weakNow／againNow＝各自開局在切段前的題數（同 startable）；seen／weak 是給爸媽看的進度
@@ -261,7 +269,7 @@
     var out = { total: ids.length, seen: 0, fresh: 0, weak: 0, weakNow: 0, againNow: 0 };
     ids.forEach(function (id) {
       var cs = cardState(state, id);
-      if (cs.seen) { out.seen++; if (weakCard(cs)) out.weak++; }
+      if (cs.seen) { out.seen++; if (weakCard(cs) && !isOut(bank, id)) out.weak++; }   // 考不到的題不算待加強（練不到）
       if (startable(state, bank, id, "fresh", day)) out.fresh++;
       if (startable(state, bank, id, "weak", day)) out.weakNow++;
       if (startable(state, bank, id, "again", day)) out.againNow++;
@@ -277,7 +285,7 @@
     var d = ensureDay(state, bank, day);
     // 題庫改版後消失的卡不排進回合。R7（4agent N6）：reduce／view 都先跑 pruneVanished，這個過濾目前是防禦性冗餘
     // （拿掉它的突變 N6 是等價突變、測不出來，屬預期）；留著是為了 planSession 將來被別處直接呼叫時仍安全
-    var ids = remainingOf(d).filter(function (id) { return !!cardById(state, bank, id); });
+    var ids = remainingOf(d).filter(function (id) { return servable(state, bank, id); });   // #3010：改版當天已排進計畫的停出未做題、考不到的題不出
     return { day: day, kind: "plan", queue: stuckLast(state, bank, sessionOrder(state, bank, day, ids)), answered: [], wrong: [], kinds: {} };
   }
   function pruneVanished(state, bank, day) {
@@ -568,7 +576,7 @@
     var se = s.session, rv = se && se.kind === "review" && !se.makeup ? (se.pick || "fresh") : null;
     var cands = enabledCards(s, bank).filter(function (c) {
       if (c.concept !== orig.concept || c.id === orig.id) return false;
-      return rv ? allowedIn(s, bank, c.id, rv, day) : cardState(s, c.id).seen > 0;
+      return rv ? allowedIn(s, bank, c.id, rv, day) : cardState(s, c.id).seen > 0 && !isOut(bank, c.id);
     });
     // 新使用者第一題就答錯時同觀念還沒有練過的卡（Codex 審 e6c7ed6）：退而用同觀念還沒練過的題，
     // 不然畫面說「換一題確認」實際卻沒有確認題，再錯也不會停下來找爸媽。
@@ -599,14 +607,14 @@
     var stages = {};
     Object.keys(bank.concepts).forEach(function (cid) { stages[cid] = stageOf(s, bank, cid, today); });
     return {
-      today: today, planIds: d.planIds.slice(), doneIds: d.doneIds.slice(), remainingIds: liveRemaining(s, bank, d), missingIds: d.planIds.filter(function (id) { return d.doneIds.indexOf(id) < 0 && !cardById(s, bank, id); }),
+      today: today, planIds: d.planIds.slice(), doneIds: d.doneIds.slice(), remainingIds: liveRemaining(s, bank, d), missingIds: d.planIds.filter(function (id) { return d.doneIds.indexOf(id) < 0 && !servable(s, bank, id); }),
       // 補做已答、剩下的題沒了、那天還沒結算 ⇒ 首頁給「結算」入口（設計 T06）
       makeupPending: (s.session && s.session.makeup && s.session.day === today && (!s.session.queue.length || s.session.halted) && s.session.answered.length &&
         !(s.days[s.session.makeup] && s.days[s.session.makeup].touched.length)) ? s.session.makeup : null,
       completed: completedIn(s, bank, d), session: s.session, stages: stages, day: d,
       // 首頁只照這個挑文字（Codex 審 8364a83 T23：計畫裡有題目已不在題庫時，原本照樣說「N 張全部完成」）
       planStatus: !d.planIds.length ? "empty" : !completedIn(s, bank, d) ? "open" :
-        d.planIds.some(function (id) { return d.doneIds.indexOf(id) < 0 && !cardById(s, bank, id); }) ? "complete_missing" : "complete",
+        d.planIds.some(function (id) { return d.doneIds.indexOf(id) < 0 && !servable(s, bank, id); }) ? "complete_missing" : "complete",
       M: { cardProgress: { done: d.doneIds.length, planned: d.planIds.length }, exitPending: exitPending, extraDone: d.extraDone },
       exitLater: exitLater,
       needsHelp: Object.keys(s.help).filter(function (cid) { return s.help[cid].needsHelp && bank.concepts[cid] && conceptOn(s, bank, cid); })
@@ -627,7 +635,7 @@
     // R9（4agent）：停輪是要爸媽陪看的訊號，優先於每日完成／空計畫，不能被蓋掉
     if (v.session && v.session.halted) return "這一輪先停在這裡";
     if (!v.planIds.length) return "今天沒有排定卡片";
-    if (v.completed) return "今天的卡片都做完了";
+    if (v.completed) return v.planStatus === "complete_missing" ? "今天能做的卡片都做完了" : "今天的卡片都做完了";   // F4（Codex 審 b7bfddf）：有做不了的題時與首頁同一句
     if (v.session && !v.session.queue.length && v.session.answered.length) return "這一輪完成了";
     return "";
   }
