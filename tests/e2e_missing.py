@@ -8,7 +8,8 @@
   ④ 關閉前就開始、還沒做完的補做回合：按「開始今天的練習」不得蓋掉它，提示先做完
   ⑤ 今天還沒做完：說前面幾天沒練、做完後可以補做，沒有補做按鈕，也不說「暫停使用」
   ⑥ 補做開了、一題都還沒答就重新整理：開新回合不被擋（沒有作答可遺失）
-  ⑦ 能出的題都學會了、只剩停止出新的題沒練過：按補做的提示不得說「每一張卡都已經學會」（Codex 審 b7bfddf F5）
+  ⑦ 能出的題都學會了、只剩停止出新的題沒練過：按補做的提示不得說「每一張卡都已經學會」、不叫她再來（Codex 審 b7bfddf F5）
+  ⑧ 能出的題只剩一張練過還沒到複習日：按補做的提示要說還沒到該複習的日子，不得說「明天再來補」（Codex 審 a619a7a 等）
   每段都驗沒有 JS 錯誤
 四站同一支（核心 G5Core、存檔 key 讀頁面上的 G5Core.LS_KEY；題號取頁面題庫）。
 執行：python3.12 tests/e2e_missing.py
@@ -110,7 +111,10 @@ def main():
         ctx, page, errors = open_page(browser, (info["key"], s))
         page.wait_for_timeout(300)
         mk = page.inner_text("#makeup") if page.locator("#makeup").count() else ""
-        check("③ 補做預設開啟：有「補做 10/19」按鈕、不說暫停使用", "暫停" not in mk and page.locator("button[data-mk='2026-10-19']").count() == 1, mk[:200])
+        # 每個缺日都要有按鈕：日曆上今天以前、沒練過（沒有 on）的格子，逐一對到「補做 M/D」（Codex 審 8abf256：只驗 10/19 抓不到少列）
+        want = page.evaluate("(() => { const c = Array.from(document.querySelectorAll('#cal i')), t = c.findIndex((e) => e.classList.contains('today')); return c.slice(0, t).filter((e) => !e.classList.contains('on')).map((e) => '補做 ' + e.title); })()")
+        got = [x.inner_text() for x in page.locator("#makeup button[data-mk]").all()]
+        check("③ 補做預設開啟：今天以前每個沒練的日子都有「補做 M/D」、不說暫停使用", "暫停" not in mk and len(want) >= 2 and got == want, (want, got, mk[:200]))
         b = page.locator("button[data-mk='2026-10-19']")
         if b.count():
             b.click()
@@ -143,6 +147,7 @@ def main():
         page.wait_for_timeout(300)
         mk = page.inner_text("#makeup") if page.locator("#makeup").count() else ""
         check("⑤ 今天沒做完：說做完後可以補做、沒有補做按鈕、不說暫停使用", "可以在這裡補做" in mk and "暫停" not in mk and page.locator("button[data-mk]").count() == 0, mk[:200])
+        check("⑤ 沒有 JS 錯誤", not errors, errors)
         ctx.close()
 
         # ⑥ 補做開了、一題都還沒答就重新整理：不得卡死——開新回合要能成功（沒有作答可遺失；Codex 審 e2df182 ③）
@@ -157,8 +162,8 @@ def main():
         page.locator("#goAll").first.click()
         page.wait_for_timeout(300)
         se = json.loads(page.evaluate("localStorage.getItem(window.G5Core.LS_KEY)")).get("session") or {}
-        check("⑥ 一題都沒答的補做不擋：開得了今天的練習", not se.get("makeup") and "還沒做完" not in page.inner_text("#main"), json.dumps(se, ensure_ascii=False)[:200])
-        check("⑤⑥ 沒有 JS 錯誤", not errors, errors)
+        check("⑥ 一題都沒答的補做不擋：今天的練習回合真的開了（今天、不是補做、排著還沒做的 r3）", se.get("day") == TODAY and not se.get("makeup") and r3 in (se.get("queue") or []) and "還沒做完" not in page.inner_text("#main"), json.dumps(se, ensure_ascii=False)[:200])   # Codex 審 7926ced：只驗沒有 makeup，清空存檔也會過
+        check("⑥ 沒有 JS 錯誤", not errors, errors)
         ctx.close()
 
         # ⑦ 能出的題（練過的＋還能排成新卡的）都學會了、只剩停止出新的題沒練過：補做排不出卡，
@@ -179,11 +184,34 @@ def main():
         if b.count():
             b.click()
         page.wait_for_timeout(300)
-        main = page.inner_text("#main")
+        main = page.locator("#main > .hint").first.inner_text() if page.locator("#main > .hint").count() else ""   # 只讀補做彈出的提示；頁面別處本來就有「明天」等字
         se = json.loads(page.evaluate("localStorage.getItem(window.G5Core.LS_KEY)")).get("session")
         check("⑦ 排不出補做卡：沒有開回合", not (se or {}).get("makeup"), json.dumps(se, ensure_ascii=False)[:200])
-        check("⑦ 提示說沒有可以補做的卡，不說每一張都學會", "沒有可以補做的卡" in main and "每一張" not in main, main[:300])
+        check("⑦ 提示說能出的題都已經學會，不說每一張都學會、不叫她明天再來", "沒有可以補做的卡：能出的題都已經學會了" in main and "每一張" not in main and "明天" not in main and "再來補" not in main, main[:300])
         check("⑦ 沒有 JS 錯誤", not errors, errors)
+        ctx.close()
+
+        # ⑧ 能出的題只剩一張練過還沒學會、10/19 第一次答對、10/22 才到期：今天（10/20）補做排不出卡，
+        #    提示要說還沒到該複習的日子；不得說「明天再來補」或「不是今天練過、就是已經學會」（Codex 審 a619a7a 等四站第 1 輪）
+        s = json.loads(json.dumps(info["blank"]))
+        on = dict(ids)
+        wait_id = next(i for i in (r1, r2, r3) if on.get(i))
+        for i, ok in ids:
+            if ok:
+                s["cards"][i] = {"seen": 2, "goodDays": ["2026-10-15", "2026-10-18"], "blockedDay": None, "due": None}
+        s["cards"][wait_id] = {"seen": 1, "goodDays": ["2026-10-19"], "blockedDay": None, "due": "2026-10-22"}
+        s["days"][TODAY] = {"planIds": [], "doneIds": [], "touched": [], "extraDone": False, "labRuns": 0, "teach": 0, "mood": None}
+        ctx, page, errors = open_page(browser, (info["key"], s))
+        page.wait_for_timeout(300)
+        b = page.locator("button[data-mk='2026-10-19']")
+        if b.count():
+            b.click()
+        page.wait_for_timeout(300)
+        main = page.locator("#main > .hint").first.inner_text() if page.locator("#main > .hint").count() else ""   # 只讀補做彈出的提示；頁面別處本來就有「明天」等字
+        se = json.loads(page.evaluate("localStorage.getItem(window.G5Core.LS_KEY)")).get("session")
+        check("⑧ 還沒到期：沒有開回合", not (se or {}).get("makeup"), json.dumps(se, ensure_ascii=False)[:200])
+        check("⑧ 提示說還沒到該複習的日子，不承諾明天、不說都學會了", "還沒到該複習的日子" in main and "明天" not in main and "就是已經學會" not in main, main[:300])
+        check("⑧ 沒有 JS 錯誤", not errors, errors)
         ctx.close()
         browser.close()
     print("%d/%d PASS" % (sum(results), len(results)))

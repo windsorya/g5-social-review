@@ -138,10 +138,10 @@
     state.log.forEach(function (e) { if (e.d === td) hit[e.card] = 1; });
     today0.touched.forEach(function (id) { hit[id] = 1; });   // 作答紀錄會截斷：當天練過的也記在 touched（Codex 審 8364a83：截斷後補做又排出已用過的卡）
     Object.keys(state.days).forEach(function (k) { if (state.days[k].madeUp === td) state.days[k].touched.forEach(function (id) { hit[id] = 1; }); });
-    var fresh = cards.filter(function (c) { return cardState(state, c.id).seen === 0 && isActive(bank, c.id) && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
+    var fresh = cards.filter(function (c) { return cardState(state, c.id).seen === 0 && isActive(bank, c.id) && !isOut(bank, c.id) && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
     if (fresh.length) return fresh.slice(0, n);
-    // 練過的只出已到期的（Codex 審 4d061e3：補做不看到期日 ⇒ 答對隔天就能補做再答對、提早學會，繞過「隔 3 天」）
-    var old = cards.filter(function (c) { var cs = cardState(state, c.id); return cs.seen > 0 && !retired(cs) && !!cs.due && cs.due <= td && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
+    // 練過的只出已到期的（Codex 審 4d061e3：補做不看到期日 ⇒ 答對隔天就能補做再答對、提早學會，繞過「隔 3 天」）；考不到的題不排，與每日計畫同一條（#3010）
+    var old = cards.filter(function (c) { var cs = cardState(state, c.id); return cs.seen > 0 && !retired(cs) && !isOut(bank, c.id) && !!cs.due && cs.due <= td && today0.planIds.indexOf(c.id) < 0 && !hit[c.id]; }).map(function (c) { return c.id; });
     return reviewOrder(state, bank, old).slice(0, n);
   }
   // 補做進行中（唯一判準；core 的 sessionStart、首頁「繼續補做」、日曆說明共用）：今天的補做回合、還有題、沒停輪、至少答過一題。
@@ -334,9 +334,10 @@
           if (liveRemaining(s, bank, day).length) return fail(state0, "MAKEUP_TODAY_FIRST");   // 只有今天還有沒做完的卡才擋；空計畫（沒有任務）不是完成，但也不擋補做
           var mq = makeupCards(s, bank, day, today, mk).filter(function (id) { return servable(s, bank, id); });   // #3010 F2：開局就不放做不了的題
           if (!mq.length) {
-            // anyLeft 為假＝以後也排不出補做卡；其餘（今天都練過）明天就有（Grok 審 1b0aebe：原本一律說「明天再來補」）。
+            // anyLeft 為假＝以後也排不出補做卡；為真＝練過還沒學會的卡不是今天練過、就是還沒到期，之後才有（Grok 審 1b0aebe）。
+            // 兩種提示都不得承諾「明天」（Codex 審 a619a7a：10/19 答對、10/22 才到期的卡，10/21 仍排不出）。
             // ALLDONE 不等於每張都學會：停止出新的題可能沒練過，畫面只能說「能出的題都已經學會」（Codex 審 b7bfddf F5）
-            var anyLeft = enabledCards(s, bank).some(function (c) { var cs = cardState(s, c.id); return cs.seen > 0 ? !retired(cs) : isActive(bank, c.id); });   // 只算補做排得到的：練過沒畢業的、沒練過的新題候選（Codex 審 4d71855）
+            var anyLeft = enabledCards(s, bank).some(function (c) { var cs = cardState(s, c.id); if (isOut(bank, c.id)) return false; return cs.seen > 0 ? !retired(cs) : isActive(bank, c.id); });   // 考不到的題永遠排不到（#3010）   // 只算補做排得到的：練過沒畢業的、沒練過的新題候選（Codex 審 4d71855）
             return fail(state0, anyLeft ? "MAKEUP_EMPTY" : "MAKEUP_ALLDONE");
           }
           s.session = { day: today, kind: "review", queue: stuckLast(s, bank, sessionOrder(s, bank, today, mq)), answered: [], wrong: [], kinds: {}, makeup: mk };
