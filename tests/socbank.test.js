@@ -206,7 +206,8 @@ test("⑭有截段（end）的影片不給「在 YouTube 開啟」；沒有截�
   const run = (vids) => new Function("window", "G5_VIDEOS", "esc", m[0] + f[0] + "return videoBlock('k');")({ G5_VIDEOS: { k: vids } }, { k: vids }, esc);
   const all = [];
   Object.keys(V).forEach((k) => (Array.isArray(V[k]) ? V[k] : []).forEach((v) => all.push(v)));
-  assert.ok(all.some((v) => v.id === "RKRvSGuU_cw" && v.end === 236), "socvideos.js 應有 RKRvSGuU_cw 76–236");
+  // 2026-10-19：RKRvSGuU_cw（國中地科經緯度）已因範圍稽核拿掉；判準不綁特定影片，只要求真的有截段影片可測
+  assert.ok(all.some((v) => v.end), "socvideos.js 應至少有一段有 end 的影片（否則這條測不到東西）");
   const bad = [];
   all.forEach((v) => {
     const h = run([v]), links = h.match(/href="[^"]*youtube\.com[^"]*"/g) || [];
@@ -233,9 +234,72 @@ test("重複題合併表：被併的題存在、留下的題存在且沒被併�
     });
   });
   assert.deepEqual(bad, []);
-  assert.deepEqual(B.CARDS.map((c) => c.id), B.ALL_CARDS.filter((c) => !B.MERGED[c.id]).map((c) => c.id));
-  assert.equal(B.CARDS.length, 87);
+  assert.deepEqual(B.CARDS.map((c) => c.id), B.ALL_CARDS.filter((c) => !B.MERGED[c.id] && !(B.RETIRED || {})[c.id]).map((c) => c.id));
+  assert.equal(B.CARDS.length, 73);   // 2026-10-19：102 題－併題 15－停出 20＋1-1 補題 6（a12～a17）
   const n = {}; B.CARDS.forEach((c) => { n[c.concept] = (n[c.concept] || 0) + 1; });
   const thin = Object.keys(B.CONCEPTS).filter((k) => !(n[k] >= 4)).map((k) => k + "=" + (n[k] || 0));
   assert.deepEqual(thin, [], "每個觀念合併後至少 4 題");
+});
+
+// ---------- 2026-10-19 範圍稽核（目標：小考／期中考考高分——考不到的不練，課本教的要練得到） ----------
+// 依據：學校教學重點①（臺灣在世界地圖上的位置，利用相對位置表達周邊海域和鄰國）、康軒新版 1-1～2-2 公開教案、康軒 113 期中卷 3 份
+// （經緯度、北回歸線度數、五大山脈、憲法皆 0 題）。北回歸線本身在 2-2（熱帶／副熱帶），可以出現。
+const OUT_OF_SCOPE = /經度|緯度|東經|北緯|西經|南緯|半球|絕對位置|憲法|經線|緯線|分水嶺/;   // 分水嶺：國中七上用語（f07 停出）
+const RETIRE_OUT = ["a01", "a02", "a08", "a09", "a10", "a11", "a03", "d08", "d09", "d10", "d12", "d02", "f05", "f07", "h13", "b07", "b08"];
+const RETIRE_CHALLENGE = ["a05", "f02", "f06"];
+
+test("範圍①停出表：RETIRED 的題不排成新卡（不在 CARDS），仍在 ALL_CARDS 照常複習；out／challenge 各有理由", () => {
+  const R = B.RETIRED;
+  assert.ok(R && typeof R === "object", "socbank.js 沒有匯出 RETIRED");
+  const byId = {}; B.ALL_CARDS.forEach((c) => { byId[c.id] = c; });
+  const inCards = new Set(B.CARDS.map((c) => c.id));
+  const bad = [];
+  Object.keys(R).forEach((id) => {
+    const r = R[id];
+    if (!byId[id]) bad.push(id + " 不在 ALL_CARDS（停出不是刪題：練過的要能照常複習）");
+    if (inCards.has(id)) bad.push(id + " 停出了卻還在 CARDS（會排成新卡）");
+    if (!(r && (r.kind === "out" || r.kind === "challenge"))) bad.push(id + " kind 不是 out／challenge");
+    if (!(r && typeof r.why === "string" && r.why.replace(/\s/g, "").length >= 8)) bad.push(id + " 沒寫停出理由");
+    if (B.MERGED[id]) bad.push(id + " 同時在 MERGED 和 RETIRED");
+  });
+  assert.deepEqual(bad, []);
+  assert.deepEqual(Object.keys(R).filter((id) => R[id].kind === "out").sort(), RETIRE_OUT.slice().sort(), "out 清單和稽核結論不同");
+  assert.deepEqual(Object.keys(R).filter((id) => R[id].kind === "challenge").sort(), RETIRE_CHALLENGE.slice().sort(), "challenge 清單和稽核結論不同");
+});
+
+test("範圍②孩子看得到的文字不出現國中／別冊名詞（經緯度、半球、絕對位置、憲法、分水嶺）", () => {
+  // 判準自檢：抓得到舊說法、北回歸線不誤判
+  assert.ok(OUT_OF_SCOPE.test("臺灣大約在東經 120 到 122 度") && OUT_OF_SCOPE.test("北回歸線約在北緯 23.5 度") && OUT_OF_SCOPE.test("憲法規定") && OUT_OF_SCOPE.test("北半球") && OUT_OF_SCOPE.test("中央山脈是分水嶺"));
+  assert.ok(!OUT_OF_SCOPE.test("北回歸線通過嘉義、花蓮和澎湖") && !OUT_OF_SCOPE.test("日本在臺灣的東北方"), "北回歸線、方位不該被擋");
+  const hits = [];
+  const chk = (who, t) => { if (typeof t === "string" && OUT_OF_SCOPE.test(t)) hits.push(who + "：" + t.slice(0, 80)); };
+  // 會排成新卡的題：題目、選項、解說、提示、錯誤選項解說（答完就會看到）
+  B.CARDS.forEach((c) => { chk(c.id + " 題目", c.q); c.opts.forEach((o) => chk(c.id + " 選項", o)); chk(c.id + " 解說", c.why); chk(c.id + " 提示", c.hint); c.wrongWhy.forEach((w) => chk(c.id + " 錯誤選項解說", w)); });
+  CIDS.forEach((k) => {
+    const c = B.CONCEPTS[k];
+    ["title", "short", "exit", "exitAns"].forEach((f) => chk(k + " 觀念 " + f, c[f]));
+    X.EXPLAIN[k].forEach((ex, j) => { [ex.name, ex.task, ex.ask].concat(ex.lines).forEach((t) => chk(k + " 說法" + (j + 1), t)); chk(k + " 說法" + (j + 1) + " 圖（含 aria-label）", ex.svg()); });
+    const p = X.PREDICT[k]; [p.q, p.why].concat(p.opts).forEach((t) => chk(k + " 先想想看", t));
+  });
+  const V = require("../src/socvideos.js");
+  Object.keys(V).forEach((k) => (Array.isArray(V[k]) ? V[k] : []).forEach((v) => { chk(k + " 影片 " + v.id + " 標題", v.title); chk(k + " 影片 " + v.id + " 說明", v.note); }));
+  assert.deepEqual(hits, []);
+});
+
+test("範圍③ 1-1 相對位置：1a 會出新卡的題至少 6 張，而且都在範圍內", () => {
+  const a = B.CARDS.filter((c) => c.concept === "1a");
+  const clean = a.filter((c) => ![c.q, c.why, c.hint].concat(c.opts, c.wrongWhy).some((t) => OUT_OF_SCOPE.test(t || "")));
+  assert.ok(clean.length >= 6, "1a 範圍內的新卡只有 " + clean.length + " 張：" + clean.map((c) => c.id).join("、"));
+  assert.equal(clean.length, a.length, "1a 有範圍外的新卡：" + a.filter((c) => clean.indexOf(c) < 0).map((c) => c.id).join("、"));
+  // 學校重點①的四塊都要練得到：八方位、鄰國方位、四周的海、亞洲東部
+  const txt = a.map((c) => c.q + c.ans).join("｜");
+  [/東北方|西南方|方位/, /日本|南韓|菲律賓/, /太平洋|臺灣海峽|巴士海峽|東海/, /亞洲/].forEach((re) => assert.ok(re.test(txt), "1a 缺這一塊：" + re));
+});
+
+test("範圍④影片只收康軒五上或國小通用影片：不收別版本（翰林、南一）或國中（七上、地球科學課）", () => {
+  const V = require("../src/socvideos.js");
+  const OTHER = /翰林|南一|七上|八上|九上|國中|地球科學/;
+  const bad = [];
+  Object.keys(V).forEach((k) => (Array.isArray(V[k]) ? V[k] : []).forEach((v) => { if (OTHER.test(v.title + " " + (v.note || ""))) bad.push(k + " " + v.id + "：" + v.title); }));
+  assert.deepEqual(bad, []);
 });
