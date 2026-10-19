@@ -205,6 +205,49 @@
     });
     return out;
   }
+  // 小考複習／闖關只出還沒做過的（2026-10-19 律師：「為何用單元方式測驗，每次都要重頭做，為何已做過的題目還要做？」
+  // 「已經用其他方式做過的題目（比如闖關或每日模式），能否不用再重複做？」）。
+  // 原本整份 reviewOrder 排進去：答錯當天再答對仍是待加強（blockedDay），每一段開頭都是同一批；同天連按三段，第 3 段 20 題有 18 題做過。
+  // 做過＝任何地方答過一次（每日練習、闖關、單元、安親班卷、補做、再練答錯的都算）＝cards[id].seen>0。
+  // fresh＝還沒做過的；weak＝做過但還沒把握、今天還沒在任何地方練過的，只在她按「練待加強的」才出；again 見 againOrder。平常已經會的不再排：
+  // 答錯、答對的下一次由每日練習照到期日排（cs.due），不靠這裡重出。畫面的題數與按鈕都讀 reviewCounts，和出題同一個判準。
+  function weakCard(cs) { return cs.seen > 0 && (!cs.goodDays.length || !!cs.needsRecheck); }
+  function touchedOn(state, day) { return (day && state.days[day] && state.days[day].touched) || []; }
+  // again＝「考前全部再練一遍」（2026-10-19 律師同意保留：學會的題每日練習不再排，考前要能自己按鈕再掃一次）：
+  // 做過的也出，但最久沒練的先、今天練過的不出——分段按、隔天再按都是接著掃，不從頭來。不新增存檔欄位：最後練習日取 log 與 days[].touched
+  function againOrder(state, bank, ids, day) {
+    var t = touchedOn(state, day), last = {};
+    state.log.forEach(function (e) { if (!last[e.card] || e.d > last[e.card]) last[e.card] = e.d; });
+    Object.keys(state.days).forEach(function (k) { state.days[k].touched.forEach(function (id) { if (!last[id] || k > last[id]) last[id] = k; }); });
+    var rows = ids.filter(function (id) { return t.indexOf(id) < 0; }).map(function (id, i) { return { id: id, i: i, d: last[id] || "" }; })
+      .sort(function (a, b) { return (a.d < b.d ? -1 : a.d > b.d ? 1 : 0) || a.i - b.i; });
+    var out = [], g = 0;
+    while (g < rows.length) {   // 同一天練的（或都沒練過的）一組，組內觀念交錯
+      var e = g; while (e < rows.length && rows[e].d === rows[g].d) e++;
+      out = out.concat(reviewOrder(state, bank, rows.slice(g, e).map(function (r) { return r.id; })));
+      g = e;
+    }
+    return out;
+  }
+  function reviewPick(state, bank, ids, pick, day) {
+    if (pick === "again") return againOrder(state, bank, ids, day);
+    var t = touchedOn(state, day);
+    return reviewOrder(state, bank, ids.filter(function (id) {
+      var cs = cardState(state, id);
+      return pick === "weak" ? weakCard(cs) && t.indexOf(id) < 0 : cs.seen === 0;
+    }));
+  }
+  function reviewCounts(state, bank, ids, day) {
+    var t = touchedOn(state, day), out = { total: ids.length, seen: 0, fresh: 0, weak: 0, weakNow: 0, againNow: 0 };
+    ids.forEach(function (id) {
+      var cs = cardState(state, id);
+      if (t.indexOf(id) < 0) out.againNow++;
+      if (!cs.seen) { out.fresh++; return; }
+      out.seen++;
+      if (weakCard(cs)) { out.weak++; if (t.indexOf(id) < 0) out.weakNow++; }
+    });
+    return out;
+  }
   // 待協助的觀念排到這一輪最後：先別再刷她卡住的觀念（補救分支三）；穩定排序，其餘順序不動
   function stuckLast(state, bank, ids) {
     var stuck = function (id) { var c = cardById(state, bank, id), h = c && state.help[c.concept]; return h && h.needsHelp ? 1 : 0; };
@@ -267,9 +310,10 @@
           }
           s.session = { day: today, kind: "review", queue: stuckLast(s, bank, sessionOrder(s, bank, today, mq)), answered: [], wrong: [], kinds: {}, makeup: mk };
         } else if (action.kind === "redo" || action.kind === "review") {
-          // redo＝再練答錯的；review＝小考前把整個單元／觀念練一次。作答規則一樣，不改當日計畫與完成判定
+          // redo＝再練答錯的；review＝單元、安親班卷、闖關（pick:"weak"＝練待加強的）。作答規則一樣，不改當日計畫與完成判定
           var ids = uniq((Array.isArray(action.ids) ? action.ids : []).filter(function (id) { return !!cardById(s, bank, id); }));
-          var rq = stuckLast(s, bank, action.kind === "review" ? reviewOrder(s, bank, ids) : ids);
+          var rq = stuckLast(s, bank, action.kind === "review" ? reviewPick(s, bank, ids, action.pick === "weak" || action.pick === "again" ? action.pick : "fresh", today) : ids);
+          if (action.kind === "review" && !rq.length) return fail(state0, "REVIEW_EMPTY");   // 全都做過了：不開空回合
           if (action.kind === "review" && isNat(action.size) && action.size > 0) rq = rq.slice(0, action.size);   // 一段幾題（畫面給 20）；不給＝全部
           s.session = { day: today, kind: action.kind, queue: rq, answered: [], wrong: [], kinds: {} };
         } else {
@@ -831,7 +875,7 @@
     dayKey: dayKey, isDay: isDay, addDays: addDays, diffDays: diffDays, weekday: weekday,
     validCard: validCard, blankState: blankState, reduce: reduce, view: view, endTitle: endTitle, exitList: exitList,
     makeupInProgress: makeupInProgress, makeupUnsettled: makeupUnsettled, checkState: checkState, decode: decode, migrateV1: migrateV1, createStore: createStore,
-    cardState: cardState, cardById: cardById, isActive: isActive, poolCards: poolCards, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
+    cardState: cardState, cardById: cardById, isActive: isActive, poolCards: poolCards, reviewCounts: reviewCounts, reviewPick: reviewPick, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
     dissolveNew: dissolveNew, dissolveAddSugar: dissolveAddSugar, dissolveAddSalt: dissolveAddSalt,
     dissolveStep: dissolveStep, dissolveRead: dissolveRead, shadowFromSun: shadowFromSun, dirName: dirName
   };

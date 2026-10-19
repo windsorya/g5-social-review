@@ -97,7 +97,8 @@ def main():
             pg.locator("#cGo").click()
             pg.wait_for_selector("#main .q")
             qh = pg.locator("#main .qhead").inner_text()
-            check(f"{tag} ⑥ 觀念頁說明之前就有「直接闖關」，按下去開始這站全部 {d['n2']} 題", gy < ey and f"1 / {d['n2']}" in qh, (gy, ey, qh[-24:]))
+            # 2026-10-19 律師：「之前有做過，應該就不用重做」⇒ 闖關只出這站還沒做過的（存檔裡第二站做過 2 題）
+            check(f"{tag} ⑥ 觀念頁說明之前就有「直接闖關」，按下去開始這站還沒做的 {d['n2'] - 2} 題", gy < ey and f"1 / {d['n2'] - 2}" in qh, (gy, ey, qh[-24:]))
             check(f"{tag} ⑤ 頁面沒有 JS 錯誤", not errs, errs)
             total += 6
             b.close()
