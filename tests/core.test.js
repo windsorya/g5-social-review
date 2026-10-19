@@ -1455,7 +1455,7 @@ test("R2b 母體只看今天的計畫：昨天沒答的停止出新題不混進�
   const done = run(s, full, NOON("2026-10-19"), op("answer", { cardId: "x", ok: true }));
   assert.deepEqual(C.poolCards(done, cut, D).map((c) => c.id).sort(), ["k", "x"], "做過的停出題照算（不倒退）");
 });
-test("R2c 新題候選都學會、只剩停止出新的題沒練過：補做回「全部學會」，不說明天再來", () => {
+test("R2c 新題候選都學會、只剩停止出新的題沒練過：補做回 MAKEUP_ALLDONE（以後也排不出），不說明天再來；畫面不得說每張都學會（Codex 審 b7bfddf F5，見 e2e_missing ⑦）", () => {
   const cut = abank(["k", "x"], ["k"]); let s = C.blankState();
   s.cards.k = learned(2, ["2026-10-15", "2026-10-18"], null);
   s.days[D] = { planIds: [], doneIds: [], touched: [], extraDone: false, labRuns: 0, teach: 0, mood: null };

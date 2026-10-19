@@ -639,12 +639,11 @@ function renderConcepts(){
 }
 // 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）：今天的卡做完後，日曆下方列出之前沒練的日子，按了補一份那天的新卡。
 // 補做過的日子在日曆上是淺綠色（核心在那天記 madeUp＝哪天補的）；連續天數照算。
-// 2026-10-18 縮範圍：補做入口預設關閉（迴圈 L20261018061404-4e46e8 4agent 後連 2 輪 Codex FAIL 都落在補做的分頁歸屬；
-// 4agent 4B-20261018-g5r2 預先約定的翻案條件）。沒練到的日子不必補——到期的卡本來就會排進之後每天的計畫。
-// 已在進行／待結算的補做照常可繼續與結算；core 的補做能力不動。重開：localStorage g5.makeupOn＝1（測試也用這個）
-var MAKEUP_ON=(function(){try{return localStorage.getItem("g5.makeupOn")==="1";}catch(e){return false;}})();
+// 2026-10-18 曾縮範圍把補做入口預設關閉（迴圈 L20261018061404-4e46e8）；2026-10-19 律師問為何補做停用、要求「修好並固化」⇒ 重新開啟（交辦 #2995／#3015）。
+// 做到一半的補做不被別的回合蓋掉，由 core 的 makeupUnsettled 擋（Codex 審 28ca6cc PASS）。
+// 不得再加開關或預設關閉：關掉＝推翻律師決定（tests/makeup_open.test.js、tests/e2e_missing.py ③⑤⑥ 鎖住）。
 var myMakeup=null;   // 本分頁開始的補做日（只有它由本分頁結算；重新整理後由 session 接手，見 renderHome 的「繼續補做」）
-var MAKEUP_MSG={MAKEUP_TODAY_FIRST:"先把今天的卡做完，才能補做前面的日子。",MAKEUP_DAY:"這一天已經練過了，不用補。",MAKEUP_EMPTY:"現在沒有可以補做的卡：新卡都練過了，其他的卡不是今天練過、就是已經學會。明天再來補。",MAKEUP_ALLDONE:"每一張卡都已經學會了（練過、也在兩個不同的日子答對），沒有卡可以拿來補做。",MAKEUP_STALE:"這一輪是在午夜以前做的，過了午夜就不能記到補做；那一天之後還可以再補。",READONLY:"另一個分頁正在練習，這一頁先只能看。",MAKEUP_NONE:"這一輪的題目沒辦法算到那一天（可能另一個分頁已經用掉，或跨過半夜了）。那一天還是可以再補一次。"};
+var MAKEUP_MSG={MAKEUP_TODAY_FIRST:"先把今天的卡做完，才能補做前面的日子。",MAKEUP_DAY:"這一天已經練過了，不用補。",MAKEUP_EMPTY:"現在沒有可以補做的卡：新卡都練過了，其他的卡不是今天練過、就是已經學會。明天再來補。",MAKEUP_ALLDONE:"目前沒有可以補做的卡：能出的題都已經學會了，也沒有新的卡可以排。",MAKEUP_STALE:"這一輪是在午夜以前做的，過了午夜就不能記到補做；那一天之後還可以再補。",READONLY:"另一個分頁正在練習，這一頁先只能看。",MAKEUP_NONE:"這一輪的題目沒辦法算到那一天（可能另一個分頁已經用掉，或跨過半夜了）。那一天還是可以再補一次。"};
 function madeUp(s,k){return !!(s.days[k]&&s.days[k].madeUp);}
 function renderCal(){
   var s=S(), v=V(), cells=[], k=START;
@@ -658,7 +657,7 @@ function renderCal(){
   var miss=C.missedDays(s,START,v.today), mkEl=$("#makeup");
   if(mkEl){
     var mkOn=C.makeupInProgress({session:v.session},v.today);   // 與 core 擋覆寫、首頁「繼續補做」同一判準（Codex 審 3704a12 ②：零作答時沒有按鈕卻叫她按）   // 停下來（halted）的補做走下面的「結算」入口（Codex 審 4d71855）   // 補做做到一半：只給「繼續補做」，不讓別的補做按鈕蓋掉進度
-    mkEl.innerHTML=!miss.length?'':mkOn?'<span class="small muted">'+md(v.session.makeup)+' 的補做還沒做完，按上面的「繼續補做」接著做。</span>':v.makeupPending?'<span class="small muted">'+md(v.makeupPending)+' 的補做已經做了 '+v.session.answered.length+' 題，還沒結算：</span><div class="row"><button class="btn ghost sm" type="button" id="goSettle">結算 '+md(v.makeupPending)+' 補做</button></div>':!MAKEUP_ON?'<span class="small muted">補做暫停使用：沒練到的日子不用補，到期的卡會自動排進之後每天的練習。</span>':
+    mkEl.innerHTML=!miss.length?'':mkOn?'<span class="small muted">'+md(v.session.makeup)+' 的補做還沒做完，按上面的「繼續補做」接著做。</span>':v.makeupPending?'<span class="small muted">'+md(v.makeupPending)+' 的補做已經做了 '+v.session.answered.length+' 題，還沒結算：</span><div class="row"><button class="btn ghost sm" type="button" id="goSettle">結算 '+md(v.makeupPending)+' 補做</button></div>':
       v.remainingIds.length?'<span class="small muted">前面有 '+miss.length+' 天沒練。今天的卡做完後，可以在這裡補做。</span>':
       '<span class="small muted">補做前面沒練的日子（每天補一份新卡）：</span><div class="row">'+miss.map(function(x){return '<button class="btn ghost sm" type="button" data-mk="'+x+'">補做 '+md(x)+'</button>';}).join("")+'</div>';
     var gs=$("#goSettle"); if(gs) gs.onclick=function(){var v2=V();if(!v2.makeupPending){renderHome();return;}myMakeup=v2.makeupPending;renderEnd();};   // 設計 T06：補做剩下的題沒了也有結算入口；結算照舊由結束畫面送 makeupClaim
