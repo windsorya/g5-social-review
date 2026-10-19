@@ -9,6 +9,8 @@
   ⑤ 一個觀念每題都做過：觀念頁寫「這一站每題都做過了」、沒有闖關鈕
   ⑥ 頁面沒有 JS 錯誤
   ⑦ 「考前全部再練一遍」（律師 10-19 同意保留、要自己按）：做過的也出，但今天練過的不出；作答畫面標籤寫明是哪一種
+  ⑧ 10-19 以前開的回合（沒有 pick）續接：做過的題自動拿掉（Codex 審 b6c9b5e F2）
+  ⑨ 待加強沒有題時說「現在沒有要加強的題」（F3）　⑩ 開新回合存檔失敗：停在首頁，「繼續」還是原本那一輪（F4）
 自然、數學、國語、社會四站同一支（題庫取法同 tests/e2e_map_rule.py）。執行：python3.12 tests/e2e_review_no_repeat.py
 """
 import json
@@ -24,14 +26,16 @@ SEED_JS = ("(function(C,cards,cons,all){var c0=Object.keys(cons)[0],cs=cards.fil
            "var B={cards:cards,concepts:cons,figs:{}},s=C.blankState(),n=0;s.settings.unit3=true;"
            "var go=function(d,id,ok){var r=C.reduce(s,{type:'answer',id:'seed'+(++n),cardId:id,ok:ok},{bank:B,now:Date.parse(d+'T12:00:00+08:00')});"
            "if(r.error)throw new Error(r.error);s=r.state;};"
-           "if(all)cs.forEach(function(c){go('" + Y + "',c.id,true);});"
+           "if(all===true)cs.forEach(function(c){go('" + Y + "',c.id,true);});"
            "else{go('" + Y + "',cs[0].id,true);go('" + Y + "',cs[1].id,false);go('" + D + "',cs[2].id,false);go('" + D + "',cs[3].id,true);}"
-           "return {key:C.LS_KEY,s:s,cid:c0,unit:cons[c0].unit,n0:cs.length,seeded:cs.slice(0,4).map(function(c){return c.id;})};})")
+           "if(all==='legacy')s.session={day:'" + D + "',kind:'review',queue:[cs[1].id,cs[4].id,cs[0].id,cs[5].id],answered:[cs[3].id],wrong:[],kinds:{}};"
+           "if(all==='again')s.session={day:'" + D + "',kind:'review',pick:'again',queue:[cs[0].id,cs[1].id,cs[4].id],answered:[cs[3].id],wrong:[],kinds:{}};"
+           "return {key:C.LS_KEY,s:s,cid:c0,unit:cons[c0].unit,n0:cs.length,seeded:cs.slice(0,4).map(function(c){return c.id;}),seeded4:[cs[4].id,cs[5].id]};})")
 
 
 def seed_state(all_done=False):
     banks = sorted((ROOT / "src").glob("*bank.js"))
-    arg = "true" if all_done else "false"
+    arg = f"'{all_done}'" if all_done in ("legacy", "again") else "true" if all_done else "false"
     if banks:
         js = ("const C=require('./src/core.js'),B=require('./src/" + banks[0].name + "');"
               "console.log(JSON.stringify(" + SEED_JS + "(C,B.CARDS,B.CONCEPTS," + arg + ")));")
@@ -72,8 +76,8 @@ def queue(pg, key):
 
 
 def main():
-    d, full = seed_state(), seed_state(True)
-    assert d["n0"] >= 5, d["n0"]
+    d, full, legacy, again = seed_state(), seed_state(True), seed_state("legacy"), seed_state("again")
+    assert d["n0"] >= 6, d["n0"]   # ⑧ 用到第 5、6 題
     seeded, key, uk = set(d["seeded"]), d["key"], "u" + d["unit"]
     with sync_playwright() as p:
         for eng, vp in ((p.chromium, {"width": 1280, "height": 900}), (p.webkit, {"width": 820, "height": 1180}), (p.chromium, {"width": 390, "height": 844})):
@@ -116,7 +120,43 @@ def main():
             pg.wait_for_selector("#main .q")
             q = queue(pg, key)
             check(f"{tag} ④ 闖關：{len(q)} 題、沒有任何做過的題", len(q) == d["n0"] - 4 and not (set(q) & seeded), (len(q), sorted(set(q) & seeded)))
+            # ⑨ 待加強沒題時說明對（Codex 審 b6c9b5e F3：原本一律說「都做過了」，其實還有新題）：
+            #    首頁先畫出「練待加強的 1 題」，再從存檔外面把那題記成今天練過（等於她在別處剛練過），按這顆過時的按鈕
+            pg.reload(); pg.wait_for_selector("#main")
+            pg.wait_for_selector(f'button[data-rvweak="{uk}"]')
+            pg.evaluate("(function(k,id,day){var o=JSON.parse(localStorage.getItem(k));o.days[day].touched.push(id);localStorage.setItem(k,JSON.stringify(o));})(%s,%s,%s); 0"
+                        % (json.dumps(key), json.dumps(d["seeded"][1]), json.dumps(D)))
+            pg.locator(f'button[data-rvweak="{uk}"]').click()
+            pg.wait_for_selector("#main .hint")
+            m = pg.inner_text("#main")
+            check(f"{tag} ⑨ 待加強沒有題：說「現在沒有要加強的題」，不說「都做過了」；新題的按鈕還在", "現在沒有要加強的題" in m and "這裡的題目都做過了" not in m
+                  and pg.locator(f'button[data-rv="{uk}"]').count() == 1, m[:160])
             check(f"{tag} ⑥ 沒有 JS 錯誤", not errs, errs)
+            ctx.close()
+            # ⑩ 開新回合存檔失敗：原本那一輪的種類不被改掉（Codex 審 b6c9b5e F4）——「全部再練一遍」做到一半，存檔壞掉時按別的單元
+            ctx, pg, errs = open_page(b, vp, again)
+            other = [x.get_attribute("data-rv") for x in pg.locator("button[data-rv]").all() if x.get_attribute("data-rv") != uk]
+            pg.evaluate("window.__si=Storage.prototype.setItem; Storage.prototype.setItem=function(){throw new Error('QuotaExceededError');}; 0")
+            if other:
+                pg.locator(f'button[data-rv="{other[0]}"]').click()
+            stayed = pg.locator("#main .qhead").count() == 0
+            pg.evaluate("Storage.prototype.setItem=window.__si; 0")
+            pg.locator("#goOn").click()
+            pg.wait_for_selector("#main .q")
+            head = pg.locator("#main .qhead").first.inner_text()
+            q = queue(pg, key)
+            check(f"{tag} ⑩ 開別的單元時存檔失敗：停在首頁；按「繼續」還是原本那一輪「全部再練一遍」", bool(other) and stayed and "全部再練一遍" in head
+                  and q == again["s"]["session"]["queue"], (other[:1], stayed, head, q))
+            check(f"{tag} ⑥ 沒有 JS 錯誤（存檔失敗）", not errs, errs)
+            ctx.close()
+            # ⑧ 10-19 以前開的回合（沒有 pick）續接：做過的題自動拿掉（Codex 審 b6c9b5e F2）
+            ctx, pg, errs = open_page(b, vp, legacy)
+            home = pg.inner_text("#main")
+            pg.locator("#goOn").click()
+            pg.wait_for_selector("#main .q")
+            q = queue(pg, key)
+            check(f"{tag} ⑧ 續接舊回合：「繼續小考複習（還有 2 題）」，佇列只剩沒做過的", "繼續小考複習（還有 2 題）" in home and q == legacy["seeded4"], (home[:200], q))
+            check(f"{tag} ⑥ 沒有 JS 錯誤（舊回合）", not errs, errs)
             ctx.close()
             ctx, pg, errs = open_page(b, vp, full)
             pg.locator(f'#concepts .ccard[data-cid="{full["cid"]}"]').click()

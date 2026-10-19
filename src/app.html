@@ -544,7 +544,7 @@ function renderHome(){
   wireReview(el);
   on("#goAll",function(){beginRound({type:"sessionStart"});});
   on("#goLight",function(){beginRound({type:"sessionStart",size:3});});
-  on("#goOn",function(){var se2=V().session;if(se2&&se2.makeup)myMakeup=se2.makeup;startRound();});   // 按「繼續補做」＝本分頁接手這份補做
+  on("#goOn",function(){act({type:"tick"});var se2=V().session;if(se2&&se2.makeup)myMakeup=se2.makeup;startRound();});   // 按「繼續補做」＝本分頁接手這份補做
   on("#goTeach",function(){renderTeach();});
   on("#goRedo",function(){var se2=V().session;if(!se2){renderHome();return;}beginRound({type:"sessionStart",kind:"redo",ids:redoIds(se2)});});   // 存檔被別處清掉後按舊畫面的按鈕：照磁碟現況回首頁，不拋錯（Codex 審 g5-sci-review 4d8b1e0，四站同型）
   renderSide();
@@ -575,15 +575,15 @@ function reviewStats(ids){return C.reviewCounts(S(),BANK,ids,V().today);}   // �
 function statLine(st){return '練過 '+st.seen+'／'+st.total+' 題'+(st.seen&&st.fresh?'・還沒做 '+st.fresh+' 題':'')+(st.weak?'・待加強 '+st.weak+' 題':'');}
 // mode：seg＝沒做過的一段 SEG 題、all＝沒做過的一次做完、weak＝練待加強的（今天還沒練過的）、
 // again＝考前全部再練一遍（律師 10-19 同意保留：做過的也出，最久沒練的先、今天練過的不出；要她自己按）
-var lastMode=null;   // 本頁按過哪一種（重新整理後不知道，標籤就只寫「小考複習」）
+// 這一輪是哪一種記在回合本身（session.pick）：標籤、結束畫面都讀它，重新整理後也知道（Codex 審 b6c9b5e F4）
 function startReview(key,mode){
   var r=reviewSets()[key]; if(!r) return;
-  lastReview=key; lastMode=mode;
   var a={type:"sessionStart",kind:"review",ids:r.ids()};
   if(mode==="weak"||mode==="again") a.pick=mode;
   if(mode!=="all") a.size=SEG;
-  beginRound(a);
+  beginRound(a,function(){lastReview=key;});   // 存檔成功才記住是哪個單元：存失敗時「繼續」的還是原本那一輪（Codex 審 b6c9b5e F4）
 }
+var EMPTY_MSG={fresh:"這裡的題目都做過了。",weak:"現在沒有要加強的題（今天練過的明天再練）。",again:"今天這裡的題目都練過了，明天再練。"};   // 依這一輪的種類說明（Codex 審 b6c9b5e F3）
 function rvButtons(k,st){
   return (st.fresh?'<button class="btn ghost sm" type="button" data-rv="'+k+'">練一段 '+Math.min(SEG,st.fresh)+' 題</button>'+
       (st.fresh>SEG?'<button class="btn ghost sm" type="button" data-rvall="'+k+'">沒做過的 '+st.fresh+' 題一次做完</button>':''):'<span class="small muted">每題都做過了</span>')+
@@ -606,9 +606,9 @@ function wireReview(el){
   el.querySelectorAll("button[data-rvagain]").forEach(function(b){b.onclick=function(){startReview(b.dataset.rvagain,"again");};});
 }
 // 開始一輪：sessionStart 真的存進去才進練習畫面；沒存到就留在原畫面（提示列會出現「再存一次」）
-function beginRound(a){act({type:"tick"});var pv=V();   // 先讓 store 補存待存作答：判斷「本頁的待結算補做」要看補存後的回合（Codex 審 6b45578 F1）
+function beginRound(a,okFn){act({type:"tick"});var pv=V();   // 先讓 store 補存待存作答：判斷「本頁的待結算補做」要看補存後的回合（Codex 審 6b45578 F1）
 var se0=pv.session;
-  if(pv.makeupPending&&pv.session){if(pv.makeupPending!==myMakeup){renderHome();toast("有一份 "+md(pv.makeupPending)+" 的補做還沒結算：請先按首頁的「結算」。");return {ok:false,error:"MAKEUP_PENDING_OTHER"};}act({type:"makeupClaim",answerDay:pv.session.day,day:pv.makeupPending,ids:pv.session.answered.slice()});}var r=act(a);if(r.ok)startRound();else if(r.error==="REVIEW_EMPTY"){renderHome();toast("這裡的題目都做過了；答錯的可以按「練待加強的」。");}else if(r.error==="MAKEUP_IN_PROGRESS"){var v1=V(),se1=v1.session;renderHome();toast((se1&&se1.makeup?md(se1.makeup)+" 的":"")+(v1.makeupPending?"補做還沒結算：先按首頁的「結算」。":"補做還沒做完：先按「繼續補做」把它做完。"));}return r;}   // 做到一半的補做由 core 擋（Codex 審 670a476／3704a12 B7）   // 開新一輪前先結算待結算的補做，免得被新回合蓋掉（Codex 審 g5-sci-review ee9c2f4）
+  if(pv.makeupPending&&pv.session){if(pv.makeupPending!==myMakeup){renderHome();toast("有一份 "+md(pv.makeupPending)+" 的補做還沒結算：請先按首頁的「結算」。");return {ok:false,error:"MAKEUP_PENDING_OTHER"};}act({type:"makeupClaim",answerDay:pv.session.day,day:pv.makeupPending,ids:pv.session.answered.slice()});}var r=act(a);if(r.ok){if(okFn)okFn();startRound();}else if(r.error==="REVIEW_EMPTY"){renderHome();toast(EMPTY_MSG[a.pick]||EMPTY_MSG.fresh);}else if(r.error==="MAKEUP_IN_PROGRESS"){var v1=V(),se1=v1.session;renderHome();toast((se1&&se1.makeup?md(se1.makeup)+" 的":"")+(v1.makeupPending?"補做還沒結算：先按首頁的「結算」。":"補做還沒做完：先按「繼續補做」把它做完。"));}return r;}   // 做到一半的補做由 core 擋（Codex 審 670a476／3704a12 B7）   // 開新一輪前先結算待結算的補做，免得被新回合蓋掉（Codex 審 g5-sci-review ee9c2f4）
 function startRound(){screen="practice";route();window.scrollTo({top:$("#main").offsetTop-8,behavior:"smooth"});}
 function renderConcepts(){
   var v=V();
@@ -678,8 +678,8 @@ function renderConcept(cid){
     '<button class="btn ghost" type="button" id="cMore">換另一種說法</button><button class="btn ghost sm" type="button" id="cBack">回首頁</button></div></div>';
   on("#cLab",function(){openLab(cid,{from:"menu"});});
   on("#cFocus",function(){beginRound({type:"sessionStart",focus:cid});});
-  on("#cGo",function(){lastReview=null;lastMode="seg";beginRound({type:"sessionStart",kind:"review",ids:conceptCards(cid)});});   // lastReview 清掉：結束畫面不帶上次單元的「再練一段」
-  on("#cWeak",function(){lastReview=null;lastMode="weak";beginRound({type:"sessionStart",kind:"review",pick:"weak",size:SEG,ids:conceptCards(cid)});});
+  on("#cGo",function(){beginRound({type:"sessionStart",kind:"review",ids:conceptCards(cid)},function(){lastReview=null;});});   // 成功才清 lastReview：結束畫面不帶上次單元的「再練一段」
+  on("#cWeak",function(){beginRound({type:"sessionStart",kind:"review",pick:"weak",size:SEG,ids:conceptCards(cid)},function(){lastReview=null;});});
   on("#cMore",function(){var b=$("#main .remedy");if(b)b.outerHTML=explainBlock(EXPLAIN[cid][1]);$("#cMore").hidden=true;});
   on("#cBack",renderHome);
   wireVideos(el);
@@ -737,7 +737,7 @@ function renderPractice(){
   if(!c) return renderEnd();
   ui={hint:false,cardId:id,variation:se.kinds[id]==="variation"};
   var con=CONCEPTS[c.concept], total=se.answered.length+se.queue.length, pos=se.answered.length+1;
-  var h='<div class="qhead"><span>'+(se.makeup?'<span class="tag" style="margin:0 6px 0 0">補做 '+md(se.makeup)+'</span>':se.kind==="review"?'<span class="tag" style="margin:0 6px 0 0">小考複習'+(lastMode==="again"?'・全部再練一遍':lastMode==="weak"?'・練待加強的':lastMode?'・還沒做過的題':'')+'</span>':'')+esc(UNITS[con.unit])+'・'+esc(con.title)+(ui.variation?'<span class="tag">同觀念換一題確認</span>':'')+'</span><span>'+pos+' / '+total+'</span></div><div class="bar"><i style="width:'+Math.round((pos-1)/total*100)+'%"></i></div>';
+  var h='<div class="qhead"><span>'+(se.makeup?'<span class="tag" style="margin:0 6px 0 0">補做 '+md(se.makeup)+'</span>':se.kind==="review"?'<span class="tag" style="margin:0 6px 0 0">小考複習'+(se.pick==="again"?'・全部再練一遍':se.pick==="weak"?'・練待加強的':se.pick==="fresh"?'・還沒做過的題':'')+'</span>':'')+esc(UNITS[con.unit])+'・'+esc(con.title)+(ui.variation?'<span class="tag">同觀念換一題確認</span>':'')+'</span><span>'+pos+' / '+total+'</span></div><div class="bar"><i style="width:'+Math.round((pos-1)/total*100)+'%"></i></div>';
   h+=questionHtml(c,"practice");
   var tools='<div class="tools"><label><input type="checkbox" id="unsure"> 我不太確定</label>'+(c.hint?'<button class="btn ghost sm" type="button" id="hintBtn">給我一點提示</button>':'')+'</div><div class="hint" id="hintBox" hidden></div>';
   if(c.type==="map"){
@@ -942,7 +942,7 @@ function segMore(se){
   if(se.kind!=="review"||!lastReview) return '';
   var r=reviewSets()[lastReview]; if(!r) return '';
   var st=reviewStats(r.ids());
-  if(lastMode==="again") return '<div class="fb" style="justify-self:stretch;text-align:left;background:var(--sun-soft)"><strong>'+esc(r.name)+'：'+(st.againNow?'全部再練一遍，今天還有 '+st.againNow+' 題沒練到':'今天每題都練過了')+'</strong>'+
+  if(se.pick==="again") return '<div class="fb" style="justify-self:stretch;text-align:left;background:var(--sun-soft)"><strong>'+esc(r.name)+'：'+(st.againNow?'全部再練一遍，今天還有 '+st.againNow+' 題沒練到':'今天每題都練過了')+'</strong>'+
     (st.againNow?'<div class="row"><button class="btn" type="button" id="goSegAgain">再練一段 '+Math.min(SEG,st.againNow)+' 題</button></div>':'')+'</div>';
   var left=st.fresh?'還有 '+st.fresh+' 題沒做過'+(st.weakNow?'、'+st.weakNow+' 題待加強':''):st.weakNow?'每題都做過了，還有 '+st.weakNow+' 題待加強':st.weak?'每題都做過了；待加強的今天練過，明天再練':'每題都做過，也都答對過了';
   return '<div class="fb" style="justify-self:stretch;text-align:left;background:var(--sun-soft)"><strong>'+esc(r.name)+'：'+left+'</strong>'+
