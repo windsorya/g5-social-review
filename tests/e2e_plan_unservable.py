@@ -3,6 +3,8 @@
 情境：今天的計畫是改版前排的，含一張現在「不再出新」的題 x（範圍稽核停出或重複題併掉，題目仍在目錄裡）＋兩張可做的題 a、b。
   A ① 首頁寫「今天要練 2 張」（x 不算）；按「開始今天的練習」，存檔裡的回合佇列只有 a、b
   B ② a、b 都做完：首頁大標題「今天能做的卡片都做完了」，並說明有題目「已停出或不在題庫，不用做」，不說「全部完成」
+  ④ 計畫只有 x、零作答：首頁說「今天排的題都不用做了」，沒有開空回合的按鈕（Codex 審 545ead0 F4）
+  ⑤ 只答過考不到（out）的題：「考考爸媽」不拿它出題（F1；數學站沒有 out 題就跳過）
   ③ 頁面沒有 JS 錯誤
 自然、數學、國語、社會四站同一支（題庫取法同 tests/e2e_review_no_repeat.py；x＝目錄裡第一張 active 以外的題）。
 執行：python3.12 tests/e2e_plan_unservable.py
@@ -16,27 +18,32 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parent.parent
 URL = (ROOT / "index.html").as_uri()
 D = "2026-10-20"
-SEED_JS = ("(function(C,all,active,done){var x=all.filter(function(c){return !active[c.id];})[0],ok=all.filter(function(c){return active[c.id];}).slice(0,2);"
+SEED_JS = ("(function(C,all,active,done,outs){var x=all.filter(function(c){return !active[c.id];})[0],ok=all.filter(function(c){return active[c.id];}).slice(0,2);"
            "var s=C.blankState();s.settings.unit3=true;var ids=[x.id,ok[0].id,ok[1].id];"
+           "if(done==='allskip'||done==='teach')ids=[x.id];"   # 考考爸媽的按鈕在「不用做／完成」的首頁
            "s.days['" + D + "']={planIds:ids,doneIds:[],touched:[],extraDone:false,labRuns:0,teach:0,mood:null};"
-           "if(done){ok.forEach(function(c){s.cards[c.id]={seen:1,goodDays:['" + D + "'],blockedDay:null,due:'2026-10-23'};"
+           "var o=outs.length?all.filter(function(c){return c.id===outs[0];})[0]:null;"
+           "if(done==='teach'&&o){s.cards[o.id]={seen:1,goodDays:['" + D + "'],blockedDay:null,due:'2026-10-23'};s.log=[{op:'seedT',d:'" + D + "',card:o.id,c:o.concept,ok:true,hint:false,unsure:false,variation:false,first:true}];s.ops=['seedT'];}"
+           "if(done===true){ok.forEach(function(c){s.cards[c.id]={seen:1,goodDays:['" + D + "'],blockedDay:null,due:'2026-10-23'};"
            "s.days['" + D + "'].doneIds.push(c.id);s.days['" + D + "'].touched.push(c.id);});}"
            "var e=C.checkState(s,{cards:all,concepts:new Proxy({},{get:function(){return {unit:'1'};}}),figs:{}});"
-           "return {key:C.LS_KEY,s:s,x:x.id,ok:[ok[0].id,ok[1].id]};})")
+           "return {key:C.LS_KEY,s:s,x:x.id,ok:[ok[0].id,ok[1].id],out:o?o.id:null};})")
 
 
 def seed_state(done):
     banks = sorted((ROOT / "src").glob("*bank.js"))
-    arg = "true" if done else "false"
+    arg = f"'{done}'" if isinstance(done, str) else "true" if done else "false"
     if banks:
         js = ("const C=require('./src/core.js'),B=require('./src/" + banks[0].name + "');const A={};B.CARDS.forEach(c=>{A[c.id]=1;});"
-              "console.log(JSON.stringify(" + SEED_JS + "(C,B.ALL_GENERATED||B.ALL_CARDS||B.CARDS,A," + arg + ")));")   # 目錄取法同 app.html 的 BASE_CARDS（數學站叫 ALL_GENERATED）
+              "const RT=B.RETIRED||{};const outs=Object.keys(RT).filter(k=>RT[k]&&RT[k].kind==='out');"
+              "console.log(JSON.stringify(" + SEED_JS + "(C,B.ALL_GENERATED||B.ALL_CARDS||B.CARDS,A," + arg + ",outs)));")   # 目錄取法同 app.html 的 BASE_CARDS（數學站叫 ALL_GENERATED）
     else:   # 自然站：目錄＝app.html 的 BASE_CARDS＋bank_extra.js；active＝扣掉 merge.js 併掉的與 retired.js 停出的（同 app.html 的 ACTIVE）
         js = ("const fs=require('fs'),vm=require('vm'),C=require('./src/core.js');const h=fs.readFileSync('src/app.html','utf8');"
               "const grab=(a,b)=>{const i=h.indexOf(a),j=h.indexOf(b,i);if(i<0||j<i)throw new Error('找不到 '+a);return h.slice(i+a.length,j);};"
               "const base=Array.from(vm.runInNewContext('('+grab('var BASE_CARDS = ',';\\nvar ALL_CARDS')+')'));"
               "const M=require('./src/merge.js'),R=require('./src/retired.js');const all=base.concat(require('./src/bank_extra.js'));const A={};all.forEach(c=>{if(!M[c.id]&&!R[c.id])A[c.id]=1;});"
-              "console.log(JSON.stringify(" + SEED_JS + "(C,all,A," + arg + ")));")
+              "const outs=Object.keys(R).filter(k=>R[k]&&R[k].kind==='out');"
+              "console.log(JSON.stringify(" + SEED_JS + "(C,all,A," + arg + ",outs)));")
     return json.loads(subprocess.check_output(["node", "-e", js], cwd=ROOT))
 
 
@@ -63,7 +70,7 @@ def open_page(b, vp, d):
 
 
 def main():
-    a, b_done = seed_state(False), seed_state(True)
+    a, b_done, skip, teach = seed_state(False), seed_state(True), seed_state("allskip"), seed_state("teach")
     with sync_playwright() as p:
         for eng, vp in ((p.chromium, {"width": 1280, "height": 900}), (p.webkit, {"width": 820, "height": 1180}), (p.chromium, {"width": 390, "height": 844})):
             br = eng.launch()
@@ -82,6 +89,19 @@ def main():
                   "今天能做的卡片都做完了" in home and "已停出或不在題庫" in home and "全部完成" not in home and "今天的卡片都做完了" not in home, home[:200])
             check(f"{tag} ③ 沒有 JS 錯誤（B）", not errs, errs)
             ctx.close()
+            # ④ #3010 F4：今天排的題全部做不了、也沒作答——說明不用做、沒有開空回合的按鈕
+            ctx, pg, errs = open_page(br, vp, skip)
+            home = pg.inner_text("#main")
+            check(f"{tag} ④ 全部做不了：說「今天排的題都不用做了」、沒有「開始今天的練習」", "今天排的題都不用做了" in home and pg.get_by_role("button", name="開始今天的練習").count() == 0, home[:160])
+            ctx.close()
+            # ⑤ #3010 F1：只答過考不到（out）的題，「考考爸媽」不拿它出題（數學站沒有 out 題就跳過）
+            if teach["out"]:
+                ctx, pg, errs = open_page(br, vp, teach)
+                pg.get_by_role("button", name="考考爸媽").first.click()
+                m = pg.inner_text("#main")
+                check(f"{tag} ⑤ 考考爸媽不出 out 題 {teach['out']}", "先練幾張卡" in m, m[:160])
+                check(f"{tag} ⑥ 沒有 JS 錯誤（考考爸媽）", not errs, errs)
+                ctx.close()
             br.close()
     print(f"\n{'ALL PASS' if not FAILS else str(len(FAILS)) + ' FAIL'}")
     return 1 if FAILS else 0

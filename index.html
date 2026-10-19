@@ -1444,7 +1444,8 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     if (day && state.days[day]) state.days[day].planIds.forEach(function (id) { ref[id] = 1; });
     // 回合只在它就是 day 那天的才算（Codex 審 8364a83 R2b：昨天沒答完的回合帶著停止出新的題，混進今天的母體）
     if (state.session && (!day || state.session.day === day)) state.session.queue.concat(state.session.answered).forEach(function (id) { ref[id] = 1; });
-    return enabledCards(state, bank).filter(function (c) { return isActive(bank, c.id) || cardState(state, c.id).seen > 0 || ref[c.id]; });
+    // #3010（Codex 審 545ead0 F3）：計畫或回合引用、但已做不了（停出未做、考不到）的題不再佔分母，免得「做過 27／28」永遠過不了關
+    return enabledCards(state, bank).filter(function (c) { return isActive(bank, c.id) || cardState(state, c.id).seen > 0 || (ref[c.id] && servable(state, bank, c.id)); });
   }
   function cardState(state, id) { return state.cards[id] || { seen: 0, goodDays: [], blockedDay: null, due: null }; }
   // 2026-10-18 律師問「以學習成效、孩子能夠負擔及吸收數量，題目數量合理嗎」：改「答對後隔 3 天再考，第 2 次答對就學會」。
@@ -1684,7 +1685,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
           var mk = action.day;
           if (!isDay(mk) || mk >= today || (s.days[mk] && s.days[mk].touched.length)) return fail(state0, "MAKEUP_DAY");
           if (liveRemaining(s, bank, day).length) return fail(state0, "MAKEUP_TODAY_FIRST");   // 只有今天還有沒做完的卡才擋；空計畫（沒有任務）不是完成，但也不擋補做
-          var mq = makeupCards(s, bank, day, today, mk);
+          var mq = makeupCards(s, bank, day, today, mk).filter(function (id) { return servable(s, bank, id); });   // #3010 F2：開局就不放做不了的題
           if (!mq.length) {
             // 全部卡都畢業了＝以後也排不出補做卡；其餘（今天都練過）明天就有（Grok 審 1b0aebe：原本一律說「明天再來補」）
             var anyLeft = enabledCards(s, bank).some(function (c) { var cs = cardState(s, c.id); return cs.seen > 0 ? !retired(cs) : isActive(bank, c.id); });   // 只算補做排得到的：練過沒畢業的、沒練過的新題候選（Codex 審 4d71855）
@@ -1696,6 +1697,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
           var ids = uniq((Array.isArray(action.ids) ? action.ids : []).filter(function (id) { return !!cardById(s, bank, id); }));
           var rq = stuckLast(s, bank, action.kind === "review" ? reviewPick(s, bank, ids, action.pick === "weak" || action.pick === "again" ? action.pick : "fresh", today) : ids);
           if (action.kind === "review" && !rq.length) return fail(state0, "REVIEW_EMPTY");   // 全都做過了：不開空回合
+          if (action.kind === "redo") { rq = rq.filter(function (id) { return servable(s, bank, id); }); if (!rq.length) return fail(state0, "REDO_EMPTY"); }   // #3010 F2：答錯的題已停出／考不到就不重練
           if (action.kind === "review" && isNat(action.size) && action.size > 0) rq = rq.slice(0, action.size);   // 一段幾題（畫面給 20）；不給＝全部
           s.session = { day: today, kind: action.kind, queue: rq, answered: [], wrong: [], kinds: {} };
           // 記下這一輪是哪一種：續接時照同一條件再篩（roundKeeps）、補救換題照同一條件挑（pickVariation）、畫面標籤照它寫（Codex 審 b6c9b5e F1／F2／F4）
@@ -2279,7 +2281,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     dayKey: dayKey, isDay: isDay, addDays: addDays, diffDays: diffDays, weekday: weekday,
     validCard: validCard, blankState: blankState, reduce: reduce, view: view, endTitle: endTitle, exitList: exitList,
     makeupInProgress: makeupInProgress, makeupUnsettled: makeupUnsettled, checkState: checkState, decode: decode, migrateV1: migrateV1, createStore: createStore,
-    cardState: cardState, cardById: cardById, isActive: isActive, poolCards: poolCards, reviewCounts: reviewCounts, reviewPick: reviewPick, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
+    cardState: cardState, cardById: cardById, isActive: isActive, servable: servable, isOut: isOut, poolCards: poolCards, reviewCounts: reviewCounts, reviewPick: reviewPick, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
     dissolveNew: dissolveNew, dissolveAddSugar: dissolveAddSugar, dissolveAddSalt: dissolveAddSalt,
     dissolveStep: dissolveStep, dissolveRead: dissolveRead, shadowFromSun: shadowFromSun, dirName: dirName
   };
@@ -2371,7 +2373,7 @@ function $(s){return document.querySelector(s);}
 function esc(t){return String(t).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
 function md(k){return k?(+k.slice(5,7))+"/"+(+k.slice(8,10)):"";}
 function card(id){return C.cardById(S(),BANK,id);}
-function redoIds(se){return se.wrong.filter(function(id){return !!card(id);});}   // 「再練答錯的」只算題庫裡還在的卡（題庫裁重複題後，答錯過的卡可能已被拿掉；Codex 審 g5-math-review 9af8526）
+function redoIds(se){return se.wrong.filter(function(id){return C.servable(S(),BANK,id);});}   // #3010 F2：已停出／考不到的不重練，與核心開局同一判準（servable）   // 「再練答錯的」只算題庫裡還在的卡（題庫裁重複題後，答錯過的卡可能已被拿掉；Codex 審 g5-math-review 9af8526）
 function conceptOn(cid){return C.conceptOn(S(),BANK,cid);}
 function srcLine(c){var r=c.src&&MB.SOURCES[c.src];return '<div class="src">'+esc(c.page||SAMPLE)+(r?'・查證：<a href="'+esc(r.url)+'" target="_blank" rel="noopener">'+esc(r.name)+'</a>':'')+"</div>";}
 function on(sel,fn){var el=typeof sel==="string"?$(sel):sel;if(el)el.onclick=fn;}
@@ -2500,9 +2502,14 @@ function renderHome(){
     var doneMsg=v.planStatus==="complete_missing"?'今天做完 '+v.doneIds.length+' 張；另有 '+v.missingIds.length+' 張題目已停出或不在題庫，不用做。':'今天 '+v.M.cardProgress.planned+' 張全部完成。';
     h='<div class="done"><b class="t">'+(v.planStatus==="complete_missing"?'今天能做的卡片都做完了':'今天的卡片都做完了')+'</b><p class="muted" style="margin:0">'+doneMsg+'想加碼可以看觀念解說、考考爸媽'+(se&&redoIds(se).length?'，或再練答錯的卡':'')+'。</p>'+cont+
       '<div class="row" style="justify-content:center">'+(se&&redoIds(se).length?'<button class="btn ghost" type="button" id="goRedo">再練答錯的 '+redoIds(se).length+' 張</button>':'')+'<button class="btn ghost" type="button" id="goTeach">考考爸媽</button></div></div>';
+  }else if(!left&&!v.doneIds.length){
+    // #3010 F4：今天排的題全部做不了、也還沒作答——說明不用做，不給開空回合的按鈕；不算完成、不加連續天數
+    h='<div class="done"><b class="t">今天排的題都不用做了</b><p class="muted" style="margin:0">今天排的 '+v.missingIds.length+' 張題目已停出或不在題庫，不用做（今天不算完成）。可以練下面「小考前想全部練一次」、去實驗室或考考爸媽。</p>'+cont+'<div class="row" style="justify-content:center"><button class="btn ghost" type="button" id="goTeach">考考爸媽</button></div></div>';
   }else{
-    var due=v.planIds.filter(function(id){return C.cardState(S(),id).seen>0;}).length, fresh=v.planIds.length-due;
-    var parts=[]; if(due) parts.push("到期複習 "+due+" 張"); if(fresh) parts.push("新卡 "+fresh+" 張"); if(v.doneIds.length) parts.push("已做 "+v.doneIds.length+" 張");
+    // #3010 F5：明細只算能做的（扣掉 missingIds＝停出或不在題庫），不用做的另列
+    var doable=v.planIds.filter(function(id){return v.missingIds.indexOf(id)<0;}), skip=v.missingIds.length;
+    var due=doable.filter(function(id){return C.cardState(S(),id).seen>0;}).length, fresh=doable.length-due;
+    var parts=[]; if(due) parts.push("到期複習 "+due+" 張"); if(fresh) parts.push("新卡 "+fresh+" 張"); if(v.doneIds.length) parts.push("已做 "+v.doneIds.length+" 張"); if(skip) parts.push("不用做 "+skip+" 張（已停出或不在題庫）");
     h='<div class="today"><div class="big"><b>'+Math.max(0,C.diffDays(v.today,EXAM))+'</b><span class="muted small">天後考試</span></div><div style="display:grid;gap:10px">'+
       '<div style="font-size:23px;font-weight:700">'+(v.doneIds.length?'今天還有 '+left+' 張':'今天要練 '+left+' 張')+'</div>'+
       '<div class="muted">'+parts.join("、")+'。答錯會有白話解說和圖。</div>'+
@@ -2892,7 +2899,7 @@ function renderEnd(){
   var title=mkDone&&dd&&dd.madeUp?md(se.makeup)+(se.halted?" 補做先算到這裡":" 補做完成"):(C.endTitle(v)||"這一輪完成了"), right=se.answered.length-se.wrong.length;
   el.innerHTML='<div class="done"><b class="t">'+esc(title)+'</b>'+(mkMsg?'<p class="muted" style="margin:0">'+esc(mkMsg)+'</p>':'')+
     '<p style="margin:0">這一輪做了 '+se.answered.length+' 張'+(se.answered.length?'，第一次就答對 '+Math.max(0,right)+' 張':'')+'。</p>'+
-    (v.completed?(v.planStatus==="complete_missing"?'<p class="muted" style="margin:0">今天能做的都做完了；另有 '+v.missingIds.length+' 張題目已停出或不在題庫，不用做。</p>':''):v.planIds.length?'<p class="muted" style="margin:0">今天的卡片完成 '+v.M.cardProgress.done+' / '+v.M.cardProgress.planned+' 張，還有 '+v.remainingIds.length+' 張，等一下想做再按開始。</p>':'')+
+    (v.completed?(v.planStatus==="complete_missing"?'<p class="muted" style="margin:0">今天能做的都做完了；另有 '+v.missingIds.length+' 張題目已停出或不在題庫，不用做。</p>':''):v.planIds.length?(v.remainingIds.length?'<p class="muted" style="margin:0">今天的卡片完成 '+v.M.cardProgress.done+' / '+v.M.cardProgress.planned+' 張，還有 '+v.remainingIds.length+' 張，等一下想做再按開始。'+(v.missingIds.length?'另有 '+v.missingIds.length+' 張已停出或不在題庫，不用做。':'')+'</p>':'<p class="muted" style="margin:0">今天排的題都已停出或不在題庫，不用做。</p>'):'')+
     '<div class="row" style="justify-content:center">'+(!v.completed&&v.remainingIds.length?'<button class="btn" type="button" id="goMore">繼續做剩下的 '+v.remainingIds.length+' 張</button>':'')+
     (redoIds(se).length?'<button class="btn ghost" type="button" id="goRedo">再練答錯的 '+redoIds(se).length+' 張</button>':'')+
     '<button class="btn ghost" type="button" id="goTeach">考考爸媽</button><button class="btn ghost" type="button" id="goHome">回首頁</button></div>'+
@@ -2933,7 +2940,7 @@ function renderTeach(){
   var s=S(), today=V().today;
   var okToday=s.log.filter(function(e){return e.d===today&&e.ok;}).map(function(e){return e.card;});
   var pool=okToday.length?okToday:s.log.filter(function(e){return e.ok;}).map(function(e){return e.card;});
-  pool=pool.filter(function(id){return !!card(id);});
+  pool=pool.filter(function(id){return !!card(id)&&!OUT[id];});   // #3010 F1：考不到的題不拿來考爸媽（作答紀錄照留）
   var el=$("#main");
   if(!pool.length){el.innerHTML='<p style="margin:0">先練幾張卡，答對的題目就可以拿來考爸媽。</p><div class="row"><button class="btn ghost" type="button" id="back">回首頁</button></div>';on("#back",renderHome);return;}
   var c=card(pool[Math.floor(Math.random()*pool.length)]);
@@ -3053,7 +3060,7 @@ function renderExit(){
 function renderSummary(){
   var v=V(), cp=v.M.cardProgress;
   var lines=["五上社會複習 "+md(v.today)+"（距考試 "+Math.max(0,C.diffDays(v.today,EXAM))+" 天）",
-    "今天卡片："+(cp.planned?cp.done+" / "+cp.planned+" 張"+(v.completed?"（完成）":""):"今天沒有排定卡片"),
+    "今天卡片："+(cp.planned?cp.done+" / "+cp.planned+" 張"+(v.completed?"（完成）":"")+(v.missingIds.length?"（另有 "+v.missingIds.length+" 張已停出或不在題庫，不用做）":""):"今天沒有排定卡片"),
     "出口題待辦："+v.M.exitPending+" 題"+(v.exitLater?"（另有 "+v.exitLater+" 題明天以後再問）":""),
     "今天加碼："+(v.M.extraDone?"有（做完卡片後又自己多做）":"還沒有")];
   if(v.needsHelp.length) lines.push("需要爸媽陪著看："+v.needsHelp.map(function(c){return CONCEPTS[c].short;}).join("、"));

@@ -91,7 +91,8 @@
     if (day && state.days[day]) state.days[day].planIds.forEach(function (id) { ref[id] = 1; });
     // 回合只在它就是 day 那天的才算（Codex 審 8364a83 R2b：昨天沒答完的回合帶著停止出新的題，混進今天的母體）
     if (state.session && (!day || state.session.day === day)) state.session.queue.concat(state.session.answered).forEach(function (id) { ref[id] = 1; });
-    return enabledCards(state, bank).filter(function (c) { return isActive(bank, c.id) || cardState(state, c.id).seen > 0 || ref[c.id]; });
+    // #3010（Codex 審 545ead0 F3）：計畫或回合引用、但已做不了（停出未做、考不到）的題不再佔分母，免得「做過 27／28」永遠過不了關
+    return enabledCards(state, bank).filter(function (c) { return isActive(bank, c.id) || cardState(state, c.id).seen > 0 || (ref[c.id] && servable(state, bank, c.id)); });
   }
   function cardState(state, id) { return state.cards[id] || { seen: 0, goodDays: [], blockedDay: null, due: null }; }
   // 2026-10-18 律師問「以學習成效、孩子能夠負擔及吸收數量，題目數量合理嗎」：改「答對後隔 3 天再考，第 2 次答對就學會」。
@@ -331,7 +332,7 @@
           var mk = action.day;
           if (!isDay(mk) || mk >= today || (s.days[mk] && s.days[mk].touched.length)) return fail(state0, "MAKEUP_DAY");
           if (liveRemaining(s, bank, day).length) return fail(state0, "MAKEUP_TODAY_FIRST");   // 只有今天還有沒做完的卡才擋；空計畫（沒有任務）不是完成，但也不擋補做
-          var mq = makeupCards(s, bank, day, today, mk);
+          var mq = makeupCards(s, bank, day, today, mk).filter(function (id) { return servable(s, bank, id); });   // #3010 F2：開局就不放做不了的題
           if (!mq.length) {
             // 全部卡都畢業了＝以後也排不出補做卡；其餘（今天都練過）明天就有（Grok 審 1b0aebe：原本一律說「明天再來補」）
             var anyLeft = enabledCards(s, bank).some(function (c) { var cs = cardState(s, c.id); return cs.seen > 0 ? !retired(cs) : isActive(bank, c.id); });   // 只算補做排得到的：練過沒畢業的、沒練過的新題候選（Codex 審 4d71855）
@@ -343,6 +344,7 @@
           var ids = uniq((Array.isArray(action.ids) ? action.ids : []).filter(function (id) { return !!cardById(s, bank, id); }));
           var rq = stuckLast(s, bank, action.kind === "review" ? reviewPick(s, bank, ids, action.pick === "weak" || action.pick === "again" ? action.pick : "fresh", today) : ids);
           if (action.kind === "review" && !rq.length) return fail(state0, "REVIEW_EMPTY");   // 全都做過了：不開空回合
+          if (action.kind === "redo") { rq = rq.filter(function (id) { return servable(s, bank, id); }); if (!rq.length) return fail(state0, "REDO_EMPTY"); }   // #3010 F2：答錯的題已停出／考不到就不重練
           if (action.kind === "review" && isNat(action.size) && action.size > 0) rq = rq.slice(0, action.size);   // 一段幾題（畫面給 20）；不給＝全部
           s.session = { day: today, kind: action.kind, queue: rq, answered: [], wrong: [], kinds: {} };
           // 記下這一輪是哪一種：續接時照同一條件再篩（roundKeeps）、補救換題照同一條件挑（pickVariation）、畫面標籤照它寫（Codex 審 b6c9b5e F1／F2／F4）
@@ -926,7 +928,7 @@
     dayKey: dayKey, isDay: isDay, addDays: addDays, diffDays: diffDays, weekday: weekday,
     validCard: validCard, blankState: blankState, reduce: reduce, view: view, endTitle: endTitle, exitList: exitList,
     makeupInProgress: makeupInProgress, makeupUnsettled: makeupUnsettled, checkState: checkState, decode: decode, migrateV1: migrateV1, createStore: createStore,
-    cardState: cardState, cardById: cardById, isActive: isActive, poolCards: poolCards, reviewCounts: reviewCounts, reviewPick: reviewPick, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
+    cardState: cardState, cardById: cardById, isActive: isActive, servable: servable, isOut: isOut, poolCards: poolCards, reviewCounts: reviewCounts, reviewPick: reviewPick, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
     dissolveNew: dissolveNew, dissolveAddSugar: dissolveAddSugar, dissolveAddSalt: dissolveAddSalt,
     dissolveStep: dissolveStep, dissolveRead: dissolveRead, shadowFromSun: shadowFromSun, dirName: dirName
   };
