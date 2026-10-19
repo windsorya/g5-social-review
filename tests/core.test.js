@@ -2178,3 +2178,37 @@ for (const pick of ["fresh", "weak", "again"]) {
       "任何模式答過 v 後，fresh 只能留下仍未做的 n");
   });
 }
+
+/* ---------- F3-R（Codex 審 7bac8d4 F3-R1／R2）：畫面的「換一題確認」不帶 variationId，由核心自動挑；
+ * 候選可能在佇列外（插到最前）或本來就在佇列裡（移到最前）。兩支都要寫 variation 標記，
+ * 而且整條「存檔還原→續接→答對」要照變式計分：算做過一次、不記有效日、log 標變式。 */
+for (const pick of ["fresh", "weak", "again"]) {
+  for (const where of ["佇列外", "佇列內"]) {
+    test(`F3-R 自動換題 ${pick}／候選在${where}：寫入標記、續接後照變式計分`, () => {
+      // 要擋：只在帶 variationId 時寫標記（R1）；只在候選不在佇列時寫標記（R2）；漏寫標記（M3）
+      // n 是別的觀念（不會被選來換題），留在佇列裡才驗得出 v 確實移到最前（收緊：不移前的錯誤實作也擋）
+      const b = { cards: [card("o"), card("v"), card("n", "1-2")], concepts: CONCEPTS, figs: FIGS };
+      let s = C.blankState();
+      if (pick !== "fresh") {
+        s = run(s, b, NOON("2026-10-19"), op("answer", { cardId: "o", ok: false }));
+        s = run(s, b, NOON("2026-10-19"), op("answer", { cardId: "n", ok: false }));
+        if (where === "佇列內") s = run(s, b, NOON("2026-10-19"), op("answer", { cardId: "v", ok: false }));
+      }
+      const ids = where === "佇列內" ? ["o", "n", "v"] : ["o", "n"];
+      s = run(s, b, NOON(D), op("sessionStart", { kind: "review", ids, pick }));
+      assert.deepEqual(s.session.queue, ids, "前置：回合題目（觀念交錯）");
+      s = run(s, b, NOON(D), op("answer", { cardId: "o", ok: false }));
+      assert.deepEqual(s.session.queue, where === "佇列內" ? ["n", "v"] : ["n"], "前置：候選" + (where === "佇列內" ? "已在佇列（不在最前）" : "不在佇列"));
+      const r = cLab(C, s, b, "o");                     // 不帶 variationId＝實際按鈕
+      assert.deepEqual([r.info.variation, r.state.session.queue, r.state.session.kinds.v], ["v", ["v", "n"], "variation"], "自動挑到 v、移到最前、有標記");
+      let t = viaJSON(C, r.state, b);
+      t = run(t, b, NOON(D), op("tick"));
+      assert.deepEqual([t.session.queue, t.session.kinds.v], [["v", "n"], "variation"], "還原、續接後標記與順序仍在");
+      const a = C.reduce(t, op("answer", { cardId: "v", ok: true }), env(b, NOON(D)));
+      assert.ok(!a.error, a.error);
+      const last = a.state.log[a.state.log.length - 1];
+      assert.deepEqual([a.info.variation, a.state.cards.v.goodDays.includes(D), last.card, last.variation], [true, false, "v", true],
+        "答對變式：照變式計分，不記今天為有效日");
+    });
+  }
+}
