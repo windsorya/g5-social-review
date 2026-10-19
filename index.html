@@ -1515,32 +1515,42 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     }
     return out;
   }
+  // 小考複習回合的資格上限（Codex 設計者 C 契約，審 f5d3498 連 2 輪 FAIL 後依升級階梯定案）：出題（reviewPick 取子集）、續接（roundKeeps）、
+  // 補救換題（pickVariation）都問這一個判準。只依作答事實（cards.seen、days.touched）與她選的種類（pick）決定；
+  // kinds＝variation 只管計分語意，不能豁免資格（舊版核心插進來的做過的題也照樣拿掉）。
+  // 查得到、觀念開放；沒做過的只出還在出新的（isActive）；做過的：fresh 不出，weak／again 今天練過的不出，weak 只出待加強的
+  function allowedIn(state, bank, id, pick, day) {
+    var c = cardById(state, bank, id);
+    if (!c || !conceptOn(state, bank, c.concept)) return false;
+    var cs = cardState(state, id);
+    if (!cs.seen) return isActive(bank, id);
+    if (pick === "fresh" || touchedOn(state, day).indexOf(id) >= 0) return false;
+    return pick === "again" || weakCard(cs);
+  }
+  // 開局的題集＝allowedIn 的子集：weak 開局只出待加強的（沒做過的題只在補救換題時可用）
+  function startable(state, bank, id, pick, day) {
+    return allowedIn(state, bank, id, pick, day) && (pick !== "weak" || weakCard(cardState(state, id)));
+  }
   function reviewPick(state, bank, ids, pick, day) {
-    if (pick === "again") return againOrder(state, bank, ids, day);
-    var t = touchedOn(state, day);
-    return reviewOrder(state, bank, ids.filter(function (id) {
-      var cs = cardState(state, id);
-      return pick === "weak" ? weakCard(cs) && t.indexOf(id) < 0 : cs.seen === 0;
-    }));
+    var ok = ids.filter(function (id) { return startable(state, bank, id, pick, day); });
+    return pick === "again" ? againOrder(state, bank, ok, day) : reviewOrder(state, bank, ok);
   }
-  // 小考複習回合續接時照這一輪的條件再篩一次（Codex 審 b6c9b5e F2：10-19 以前開的回合、或佇列裡的題後來在別處做了，續接仍會出做過的題）。
-  // 沒有 pick 的舊回合一律當「只出沒做過的」（律師：做過的不用再做）；補救換題插進來的（kinds＝variation）照留，挑的時候已守同一條件（pickVariation）。
-  // 補做回合（makeup）、每日練習、再練答錯的不動。reduce 與 view 都先跑 pruneVanished，所以首頁「繼續小考複習（還有 N 題）」與作答畫面一致
-  function roundKeeps(state, se, id, day) {
-    if (se.kind !== "review" || se.makeup || se.kinds[id] === "variation") return true;
-    var cs = cardState(state, id), p = se.pick || "fresh";
-    if (p === "fresh") return cs.seen === 0;
-    if (touchedOn(state, day).indexOf(id) >= 0) return false;
-    return p === "again" || weakCard(cs);
+  // 小考複習回合續接時照這一輪的資格再篩一次（Codex 審 b6c9b5e F2、f5d3498 F1／F2）：沒有 pick 的舊回合一律當「只出沒做過的」。
+  // 補做回合（makeup）、每日練習、再練答錯的不動。只篩待答佇列，不動 answered／wrong／cards／days。
+  // reduce 與 view 都先跑 pruneVanished，所以首頁「繼續小考複習（還有 N 題）」與作答畫面一致
+  function roundKeeps(state, bank, se, id, day) {
+    if (se.kind !== "review" || se.makeup) return true;
+    return allowedIn(state, bank, id, se.pick || "fresh", day);
   }
+  // 畫面題數：fresh／weakNow／againNow＝各自開局在切段前的題數（同 startable）；seen／weak 是給爸媽看的進度
   function reviewCounts(state, bank, ids, day) {
-    var t = touchedOn(state, day), out = { total: ids.length, seen: 0, fresh: 0, weak: 0, weakNow: 0, againNow: 0 };
+    var out = { total: ids.length, seen: 0, fresh: 0, weak: 0, weakNow: 0, againNow: 0 };
     ids.forEach(function (id) {
       var cs = cardState(state, id);
-      if (t.indexOf(id) < 0) out.againNow++;
-      if (!cs.seen) { out.fresh++; return; }
-      out.seen++;
-      if (weakCard(cs)) { out.weak++; if (t.indexOf(id) < 0) out.weakNow++; }
+      if (cs.seen) { out.seen++; if (weakCard(cs)) out.weak++; }
+      if (startable(state, bank, id, "fresh", day)) out.fresh++;
+      if (startable(state, bank, id, "weak", day)) out.weakNow++;
+      if (startable(state, bank, id, "again", day)) out.againNow++;
     });
     return out;
   }
@@ -1562,7 +1572,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     // 2026-10-18 題庫裁重複題後（Codex 審 g5-math-review 3751016）：原本連已完成的也刪，今天的「完成」倒退、補做被鎖，進行中的補做也失去已答紀錄而無法結算
     // 今天的計畫一律不刪：目錄裡真的查不到的題照留，今天如實顯示沒做完（Codex 審 4d71855 T23：刪掉會變成沒做也算完成）
     if (state.session) state.session.queue = state.session.queue.filter(ok);   // 只有完整目錄裡真的查不到的卡才拿掉（停止出新的題仍查得到，不會走到這裡）；補做一律由畫面明確送 makeupClaim 結算
-    if (state.session) state.session.queue = state.session.queue.filter(function (id) { return roundKeeps(state, state.session, id, day); });
+    if (state.session) state.session.queue = state.session.queue.filter(function (id) { return roundKeeps(state, bank, state.session, id, day); });
   }
   // 跨午夜：日期與任務一起切換（矩陣 16、17）
   function syncSession(state, bank, day) {
@@ -1838,17 +1848,13 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
   }
 
   // 變式：同概念、已學、不是原卡；優先已在佇列的（移到前方），否則挑最不熟的（矩陣 6）
-  // 小考複習／闖關回合照這一輪的條件挑（Codex 審 b6c9b5e F1：原本專挑練過的，「只出沒做過的」回合會插回做過的題）：
-  // fresh＝沒做過的；weak＝沒做過的或待加強的；again＝都可以；三種都不拿今天練過的（她剛看過答案，換題確認不準）。挑不到就不換題（同「這個觀念沒有別題」）
+  // 小考複習／闖關回合照這一輪的資格挑（allowedIn；Codex 審 b6c9b5e F1）：fresh 只換沒做過的；weak 換沒做過的或待加強的；again 都可；
+  // 三種都不拿今天練過的（她剛看過答案，換題確認不準）、不拿停止出新的。指定的 variationId 不合格就不採用；挑不到就不換題（同「這個觀念沒有別題」）
   function pickVariation(s, bank, orig, wanted, day) {
-    var se = s.session, rv = se && se.kind === "review" && !se.makeup ? (se.pick || "fresh") : null, t = touchedOn(s, day);
+    var se = s.session, rv = se && se.kind === "review" && !se.makeup ? (se.pick || "fresh") : null;
     var cands = enabledCards(s, bank).filter(function (c) {
       if (c.concept !== orig.concept || c.id === orig.id) return false;
-      var cs = cardState(s, c.id);
-      if (!rv) return cs.seen > 0;
-      if (t.indexOf(c.id) >= 0) return false;
-      if (cs.seen === 0) return isActive(bank, c.id);   // 沒做過的：只拿還在出新的題（裁掉的不出，同 computePlan）
-      return rv === "again" || (rv === "weak" && weakCard(cs));
+      return rv ? allowedIn(s, bank, c.id, rv, day) : cardState(s, c.id).seen > 0;
     });
     // 新使用者第一題就答錯時同觀念還沒有練過的卡（Codex 審 e6c7ed6）：退而用同觀念還沒練過的題，
     // 不然畫面說「換一題確認」實際卻沒有確認題，再錯也不會停下來找爸媽。
@@ -2123,11 +2129,18 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
       st.state = r.state; st.saveStatus = "ok"; if (st.pendingAction && st.pendingAction.id === action.id) st.pendingAction = null;
       return { ok: true, info: r.info, state: st.state };
     }
-    // 沒有待存（例如沒開成的新一輪）：磁碟讀得到就把「沒有存到」的提示清掉，不讓「再存一次」按了沒反應、提示列卡著（同 #2231）
+    // 再存一次：有待存就重試那一筆；沒有待存（例如沒開成的新一輪）時要回報實際結果（Codex 設計者 C 契約，審 f5d3498 F4）：
+    // 唯讀頁、封鎖一律不寫、回失敗；讀得到最新存檔才把它實寫一次，寫得進去才清提示——寫入仍壞就照樣失敗、提示留著（不讓提示列卡死也不假稱恢復，同 #2231）
     function retry() {
       if (st.pendingAction) return dispatch(st.pendingAction);
-      if (!st.loadError && st.saveStatus !== "ok" && refresh()) st.saveStatus = "ok";
-      return { ok: true, nothing: true, state: st.state };
+      if (st.saveStatus === "ok") return { ok: true, nothing: true, state: st.state };
+      if (readonly()) return { ok: false, error: "READONLY", state: st.state };
+      if (st.loadError) return { ok: false, error: "BLOCKED", state: st.state };
+      if (!refresh()) { st.saveStatus = "failed"; return { ok: false, error: "SAVE_FAILED", state: st.state }; }
+      var w = write(st.state);
+      if (w !== "ok") { st.saveStatus = w; return { ok: false, error: w === "invalid" ? "INVARIANT" : "SAVE_" + w.toUpperCase(), state: st.state }; }
+      st.saveStatus = "ok";
+      return { ok: true, state: st.state };
     }
     function reload() {   // 唯讀頁拿到寫入權時先換成磁碟最新版；開頁時延後的 v1 搬家在這裡做
       if (st.pendingMigrate && !readonly()) { st.pendingMigrate = false; return load(); }
@@ -2463,10 +2476,14 @@ function startReview(key,mode){
   if(mode!=="all") a.size=SEG;
   beginRound(a,function(){lastReview=key;});   // 存檔成功才記住是哪個單元：存失敗時「繼續」的還是原本那一輪（Codex 審 b6c9b5e F4）
 }
-var EMPTY_MSG={fresh:"這裡的題目都做過了。",weak:"現在沒有要加強的題（今天練過的明天再練）。",again:"今天這裡的題目都練過了，明天再練。"};   // 依這一輪的種類說明（Codex 審 b6c9b5e F3）
+var EMPTY_MSG={weak:"現在沒有要加強的題（今天練過的明天再練）。",again:"今天沒有可以再練的題了（今天練過的明天再練）。"};
+// 只有「做過題數＝總題數」才能說每題都做過；可以出的新題 0 題可能是剩下的停止出新（Codex 審 c07244c F1）
+function doneAll(st){return st.seen>=st.total;}   // 依這一輪的種類說明（Codex 審 b6c9b5e F3）
+// 「沒做過的」沒題：每題都做過才說做過；還有沒做過但停止出新的題，就說沒有可以出的新題（Codex 設計者 C：不能因停出被排除就宣稱做過）
+function emptyMsg(a){if(a.pick==="weak"||a.pick==="again")return EMPTY_MSG[a.pick];var st=reviewStats(a.ids||[]);return st.seen>=st.total?"這裡的題目都做過了。":"這裡沒有可以出的新題了。";}
 function rvButtons(k,st){
   return (st.fresh?'<button class="btn ghost sm" type="button" data-rv="'+k+'">練一段 '+Math.min(SEG,st.fresh)+' 題</button>'+
-      (st.fresh>SEG?'<button class="btn ghost sm" type="button" data-rvall="'+k+'">沒做過的 '+st.fresh+' 題一次做完</button>':''):'<span class="small muted">每題都做過了</span>')+
+      (st.fresh>SEG?'<button class="btn ghost sm" type="button" data-rvall="'+k+'">沒做過的 '+st.fresh+' 題一次做完</button>':''):'<span class="small muted">'+(doneAll(st)?'每題都做過了':'沒有可以出的新題了')+'</span>')+
     (st.weakNow?'<button class="btn ghost sm" type="button" data-rvweak="'+k+'">練待加強的 '+Math.min(SEG,st.weakNow)+' 題</button>':st.weak?'<span class="small muted">待加強的今天都練過了，明天再練</span>':'')+
     (st.seen&&st.againNow?'<button class="btn ghost sm" type="button" data-rvagain="'+k+'">考前全部再練一遍</button>':'');
 }
@@ -2488,7 +2505,7 @@ function wireReview(el){
 // 開始一輪：sessionStart 真的存進去才進練習畫面；沒存到就留在原畫面（提示列會出現「再存一次」）
 function beginRound(a,okFn){act({type:"tick"});var pv=V();   // 先讓 store 補存待存作答：判斷「本頁的待結算補做」要看補存後的回合（Codex 審 6b45578 F1）
 var se0=pv.session;
-  if(pv.makeupPending&&pv.session){if(pv.makeupPending!==myMakeup){renderHome();toast("有一份 "+md(pv.makeupPending)+" 的補做還沒結算：請先按首頁的「結算」。");return {ok:false,error:"MAKEUP_PENDING_OTHER"};}act({type:"makeupClaim",answerDay:pv.session.day,day:pv.makeupPending,ids:pv.session.answered.slice()});}var r=act(a);if(r.ok){if(okFn)okFn();startRound();}else if(r.error==="REVIEW_EMPTY"){renderHome();toast(EMPTY_MSG[a.pick]||EMPTY_MSG.fresh);}else if(r.error==="MAKEUP_IN_PROGRESS"){var v1=V(),se1=v1.session;renderHome();toast((se1&&se1.makeup?md(se1.makeup)+" 的":"")+(v1.makeupPending?"補做還沒結算：先按首頁的「結算」。":"補做還沒做完：先按「繼續補做」把它做完。"));}return r;}   // 做到一半的補做由 core 擋（Codex 審 670a476／3704a12 B7）   // 開新一輪前先結算待結算的補做，免得被新回合蓋掉（Codex 審 g5-sci-review ee9c2f4）
+  if(pv.makeupPending&&pv.session){if(pv.makeupPending!==myMakeup){renderHome();toast("有一份 "+md(pv.makeupPending)+" 的補做還沒結算：請先按首頁的「結算」。");return {ok:false,error:"MAKEUP_PENDING_OTHER"};}act({type:"makeupClaim",answerDay:pv.session.day,day:pv.makeupPending,ids:pv.session.answered.slice()});}var r=act(a);if(r.ok){if(okFn)okFn();startRound();}else if(r.error==="REVIEW_EMPTY"){renderHome();toast(emptyMsg(a));}else if(/^SAVE_|^INVARIANT$/.test(r.error||"")&&a.kind!=="makeup"){toast("這一輪還沒開始（這台裝置剛剛存不進去），請再按一次。");}else if(r.error==="MAKEUP_IN_PROGRESS"){var v1=V(),se1=v1.session;renderHome();toast((se1&&se1.makeup?md(se1.makeup)+" 的":"")+(v1.makeupPending?"補做還沒結算：先按首頁的「結算」。":"補做還沒做完：先按「繼續補做」把它做完。"));}return r;}   // 做到一半的補做由 core 擋（Codex 審 670a476／3704a12 B7）   // 開新一輪前先結算待結算的補做，免得被新回合蓋掉（Codex 審 g5-sci-review ee9c2f4）
 function startRound(){screen="practice";route();window.scrollTo({top:$("#main").offsetTop-8,behavior:"smooth"});}
 function renderConcepts(){
   var v=V();
@@ -2551,7 +2568,7 @@ function renderConcept(cid){
   el.innerHTML='<div style="display:grid;gap:14px"><div class="qhead"><span>'+esc(UNITS[c.unit])+'</span><span>'+STAGE[v.stages[cid]]+'</span></div><h2>'+esc(c.title)+'</h2>'+
     (stuck?'<div class="banner info"><strong>這個觀念先和爸媽一起看圖解</strong><span class="small">爸媽在「家長摘要」按「已經陪她看過」以後，再來練這個觀念的題目。</span></div>':'')+
     // 2026-10-14 律師（孩子要「直接闖關」）：標題下面就放闖關鈕＝練這個觀念的全部題目；做完全部＝地圖走過這一站
-    (stuck?'':'<div class="row" id="cGoRow">'+(cst.fresh?'<button class="btn" type="button" id="cGo">直接闖關：'+(cst.seen?'還有 '+cst.fresh+' 題沒做':'做完這 '+cst.fresh+' 題')+'</button>':'<b>這一站每題都做過了</b>')+'<span class="small muted">'+esc((MAPX&&MAPX.RULE)||"")+'</span></div>')+
+    (stuck?'':'<div class="row" id="cGoRow">'+(cst.fresh?'<button class="btn" type="button" id="cGo">直接闖關：'+(cst.seen?'還有 '+cst.fresh+' 題沒做':'做完這 '+cst.fresh+' 題')+'</button>':cst.seen>=cst.total?'<b>這一站每題都做過了</b>':'<b>這一站沒有新題了</b>')+'<span class="small muted">'+esc((MAPX&&MAPX.RULE)||"")+'</span></div>')+
     explainBlock(ex)+videoBlock(cid)+
     '<div class="row"><button class="btn" type="button" id="cLab">一句一句看懂</button>'+(mine&&!v.completed&&!stuck?'<button class="btn ghost" type="button" id="cFocus">先練這個觀念（今天 '+mine+' 張）</button>':'')+
     (stuck||!cst.weakNow?'':'<button class="btn ghost" type="button" id="cWeak">練待加強的 '+Math.min(SEG,cst.weakNow)+' 題</button>')+
@@ -2822,9 +2839,10 @@ function segMore(se){
   if(se.kind!=="review"||!lastReview) return '';
   var r=reviewSets()[lastReview]; if(!r) return '';
   var st=reviewStats(r.ids());
-  if(se.pick==="again") return '<div class="fb" style="justify-self:stretch;text-align:left;background:var(--sun-soft)"><strong>'+esc(r.name)+'：'+(st.againNow?'全部再練一遍，今天還有 '+st.againNow+' 題沒練到':'今天每題都練過了')+'</strong>'+
+  if(se.pick==="again") return '<div class="fb" style="justify-self:stretch;text-align:left;background:var(--sun-soft)"><strong>'+esc(r.name)+'：'+(st.againNow?'全部再練一遍，今天還有 '+st.againNow+' 題沒練到':'今天沒有可以再練的題了')+'</strong>'+
     (st.againNow?'<div class="row"><button class="btn" type="button" id="goSegAgain">再練一段 '+Math.min(SEG,st.againNow)+' 題</button></div>':'')+'</div>';
-  var left=st.fresh?'還有 '+st.fresh+' 題沒做過'+(st.weakNow?'、'+st.weakNow+' 題待加強':''):st.weakNow?'每題都做過了，還有 '+st.weakNow+' 題待加強':st.weak?'每題都做過了；待加強的今天練過，明天再練':'每題都做過，也都答對過了';
+  var head=doneAll(st)?'每題都做過了':'沒有可以出的新題了';
+  var left=st.fresh?'還有 '+st.fresh+' 題沒做過'+(st.weakNow?'、'+st.weakNow+' 題待加強':''):st.weakNow?head+'，還有 '+st.weakNow+' 題待加強':st.weak?head+'；待加強的今天練過，明天再練':doneAll(st)?'每題都做過，也都答對過了':head;
   return '<div class="fb" style="justify-self:stretch;text-align:left;background:var(--sun-soft)"><strong>'+esc(r.name)+'：'+left+'</strong>'+
     '<div class="row">'+(st.fresh?'<button class="btn" type="button" id="goSeg">再練一段 '+Math.min(SEG,st.fresh)+' 題</button>'+
     (st.fresh>SEG?'<button class="btn ghost" type="button" id="goSegAll">沒做過的一次做完</button>':''):'')+

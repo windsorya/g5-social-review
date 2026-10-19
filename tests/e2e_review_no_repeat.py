@@ -39,11 +39,11 @@ def seed_state(all_done=False):
     if banks:
         js = ("const C=require('./src/core.js'),B=require('./src/" + banks[0].name + "');"
               "console.log(JSON.stringify(" + SEED_JS + "(C,B.CARDS,B.CONCEPTS," + arg + ")));")
-    else:   # 自然站：題庫＝app.html 的 BASE_CARDS＋src/bank_extra.js，扣掉 src/merge.js 合併掉的（同 tests/e2e_map_rule.py）
+    else:   # 自然站：題庫＝app.html 的 BASE_CARDS＋src/bank_extra.js，扣掉 src/merge.js 合併掉的與 src/retired.js 停出的（同 tests/e2e_map_rule.py）
         js = ("const fs=require('fs'),vm=require('vm'),C=require('./src/core.js');const h=fs.readFileSync('src/app.html','utf8');"
               "const grab=(a,b)=>{const i=h.indexOf(a),j=h.indexOf(b,i);if(i<0||j<i)throw new Error('找不到 '+a);return h.slice(i+a.length,j);};"
               "const base=Array.from(vm.runInNewContext('('+grab('var BASE_CARDS = ',';\\nvar ALL_CARDS')+')'));"
-              "const M=require('./src/merge.js');const cards=base.concat(require('./src/bank_extra.js')).filter(c=>!M[c.id]);"
+              "const M=require('./src/merge.js'),R=require('./src/retired.js');const cards=base.concat(require('./src/bank_extra.js')).filter(c=>!M[c.id]&&!R[c.id]);"
               "const cons=vm.runInNewContext('('+grab('var CONCEPTS = ',';\\nvar CIDS')+')');"
               "console.log(JSON.stringify(" + SEED_JS + "(C,cards,cons," + arg + ")));")
     return json.loads(subprocess.check_output(["node", "-e", js], cwd=ROOT))
@@ -139,13 +139,13 @@ def main():
             pg.evaluate("window.__si=Storage.prototype.setItem; Storage.prototype.setItem=function(){throw new Error('QuotaExceededError');}; 0")
             if other:
                 pg.locator(f'button[data-rv="{other[0]}"]').click()
-            stayed = pg.locator("#main .qhead").count() == 0
+            stayed = pg.locator("#main .qhead").count() == 0 and "這一輪還沒開始" in pg.inner_text("#main")   # 明示沒開成（Codex 設計者 C）
             pg.evaluate("Storage.prototype.setItem=window.__si; 0")
             pg.locator("#goOn").click()
             pg.wait_for_selector("#main .q")
             head = pg.locator("#main .qhead").first.inner_text()
             q = queue(pg, key)
-            check(f"{tag} ⑩ 開別的單元時存檔失敗：停在首頁；按「繼續」還是原本那一輪「全部再練一遍」", bool(other) and stayed and "全部再練一遍" in head
+            check(f"{tag} ⑩ 開別的單元時存檔失敗：停在首頁、說這一輪還沒開始；按「繼續」還是原本那一輪「全部再練一遍」", bool(other) and stayed and "全部再練一遍" in head
                   and q == again["s"]["session"]["queue"], (other[:1], stayed, head, q))
             check(f"{tag} ⑥ 沒有 JS 錯誤（存檔失敗）", not errs, errs)
             ctx.close()
