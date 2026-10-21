@@ -235,7 +235,7 @@ test("重複題合併表：被併的題存在、留下的題存在且沒被併�
   });
   assert.deepEqual(bad, []);
   assert.deepEqual(B.CARDS.map((c) => c.id), B.ALL_CARDS.filter((c) => !B.MERGED[c.id] && !(B.RETIRED || {})[c.id]).map((c) => c.id));
-  assert.equal(B.CARDS.length, 75);   // 2026-10-22：102 題－併題 13（c12、g02 改回保留，#2709）－停出 20＋1-1 補題 6（a12～a17）
+  assert.equal(B.CARDS.length, 77);   // 2026-10-22：102 題－併題 11（c12、g02、c11、g01 改回保留，#2709）－停出 20＋1-1 補題 6（a12～a17）
   const n = {}; B.CARDS.forEach((c) => { n[c.concept] = (n[c.concept] || 0) + 1; });
   const thin = Object.keys(B.CONCEPTS).filter((k) => !(n[k] >= 4)).map((k) => k + "=" + (n[k] || 0));
   assert.deepEqual(thin, [], "每個觀念合併後至少 4 題");
@@ -248,7 +248,9 @@ const NOT_DUPLICATE = {
   f10: "暴雨時河水很快流入大海（Codex 審 51496e7）",
   g11: "離太陽比較遠、雨比較少的誤解（Codex 審 51496e7）",
   c12: "c01 沒考「讓大家都一樣有錢」「只用來處罰小孩」（Codex 審 7b9e5fe）",
-  g02: "g04 沒考「沙漠氣候」／臺灣雨量多（Codex 審 7b9e5fe）"
+  g02: "g04 沒考「沙漠氣候」／臺灣雨量多（Codex 審 7b9e5fe）",
+  c11: "c03 沒考「法律只管家裡的事」（Codex 審 e61beae）",
+  g01: "g03 沒考「寒帶」「溫帶」（Codex 審 e61beae）"
 };
 test("重複題合併表：審查判定保留題考不到它的誤解的題，不得再併、照常出題", () => {
   const inCards = new Set(B.CARDS.map((c) => c.id));
@@ -256,6 +258,32 @@ test("重複題合併表：審查判定保留題考不到它的誤解的題，�
   Object.keys(NOT_DUPLICATE).forEach((id) => {
     if (B.MERGED[id]) bad.push(id + " 又被併到 " + B.MERGED[id].keep.join("、") + "：" + NOT_DUPLICATE[id]);
     else if (!inCards.has(id) && !(B.RETIRED || {})[id]) bad.push(id + " 不在出題集合");
+  });
+  assert.deepEqual(bad, []);
+});
+
+// covers：被併題的每一個錯誤選項都要有人負責排除（why 只講正解，三輪審查各抓到漏網後補的對帳欄）
+test("重複題合併表 covers：被併題的每個錯誤選項都寫了由哪一題（列在 keep、同觀念、沒被併）怎麼排除，不多不少", () => {
+  const byId = {}; B.ALL_CARDS.forEach((c) => { byId[c.id] = c; });
+  const bad = [];
+  Object.keys(B.MERGED).forEach((id) => {
+    const m = B.MERGED[id], c = byId[id];
+    if (!c) return;   // 不在題庫由上一條測試報
+    const wrong = c.opts.filter((_, i) => i !== c.a).slice().sort();
+    const cv = m.covers || {};
+    const keys = Object.keys(cv).sort();
+    if (JSON.stringify(keys) !== JSON.stringify(wrong)) bad.push(id + " covers 的選項 " + JSON.stringify(keys) + " ≠ 錯誤選項 " + JSON.stringify(wrong));
+    keys.forEach((o) => {
+      const v = cv[o] || {};
+      if (!Array.isArray(v.by) || !v.by.length) { bad.push(id + "「" + o + "」沒寫 by"); return; }
+      v.by.forEach((k) => {
+        if (!byId[k]) bad.push(id + "「" + o + "」by " + k + " 不在題庫");
+        else if ((m.keep || []).indexOf(k) < 0) bad.push(id + "「" + o + "」by " + k + " 沒列在 keep");
+        else if (B.MERGED[k]) bad.push(id + "「" + o + "」by " + k + " 自己也被併掉了");
+        else if (byId[k].concept !== c.concept) bad.push(id + "「" + o + "」by " + k + " 跨觀念");
+      });
+      if (typeof v.how !== "string" || v.how.replace(/\s/g, "").length < 8) bad.push(id + "「" + o + "」沒寫怎麼排除（how）");
+    });
   });
   assert.deepEqual(bad, []);
 });
