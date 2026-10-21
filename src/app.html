@@ -814,6 +814,7 @@ function retrySave(){
 // 回傳 true＝已在原畫面重繪；false＝不在學習畫面（或這一輪不在紀錄裡），交給 route()
 function labRefresh(){
   if(screen!=="lab"||!lab||!run()) return false;
+  if(run().phase==="complete"){labFinish();return true;}   // 補存進去的是完成：照完成鈕成功時的去向
   if(lab.sync) lab.sync();
   drawPredict(); drawTasks(); drawNav();
   return true;
@@ -1043,16 +1044,23 @@ function drawNav(){
   var rr=run(), all=rr.prediction!==null&&rr.tasksDone.length>=rr.tasks, nav=$("#labNav");
   if(lab.ctx.from==="wrong"){
     nav.innerHTML='<button class="btn" type="button" id="labDone"'+(all?'':' disabled')+'>'+(all?'我看懂了，換一題確認':(rr.prediction===null?'先想一想，再看解說':'每一句都看過後就能換一題確認'))+'</button><button class="btn ghost sm" type="button" id="labSkip">先回到練習</button>';
-    on("#labDone",function(){stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(labGone(r))return;if(!r.ok&&!r.dup)return;lab=null;screen="practice";route();});
+    on("#labDone",function(){stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(labGone(r))return;if(!r.ok&&!r.dup)return;labFinish();});
     on("#labSkip",function(){stopAnim();lab=null;screen="practice";route();});
   }else{
     nav.innerHTML='<button class="btn" type="button" id="labDone"'+(all?'':' disabled')+'>'+(all?'完成了':'每一步都看過後按這裡')+'</button><button class="btn ghost sm" type="button" id="labHome">回首頁</button>';
-    on("#labDone",function(){stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(labGone(r))return;if(!r.ok&&!r.dup)return;lab=null;
-      $("#main").innerHTML='<div class="done"><b class="t">看完了</b><p class="muted" style="margin:0">把解說看懂了，再回去練卡片或考考爸媽。</p><div class="row" style="justify-content:center"><button class="btn ghost" type="button" id="back3">回首頁</button></div></div>';on("#back3",renderHome);renderSide();});
+    on("#labDone",function(){stopAnim();var r=act({type:"labComplete",runId:lab.runId});if(labGone(r))return;if(!r.ok&&!r.dup)return;labFinish();});
     on("#labHome",function(){stopAnim();lab=null;renderHome();});
   }
 }
 
+// 這一輪已完成（按完成鈕存好，或完成鈕那一下沒存到、之後補存進去）：答錯補救進來的回練習換一題確認，其他到完成畫面
+// （#2632：補存的是 labComplete 時，labRefresh 原本留在已完成的頁面、要再按一次完成；更早的版本 route() 則甩回首頁）
+function labFinish(){
+  stopAnim();
+  if(lab.ctx.from==="wrong"){lab=null;screen="practice";route();return;}
+  lab=null;
+  $("#main").innerHTML='<div class="done"><b class="t">看完了</b><p class="muted" style="margin:0">把解說看懂了，再回去練卡片或考考爸媽。</p><div class="row" style="justify-content:center"><button class="btn ghost" type="button" id="back3">回首頁</button></div></div>';on("#back3",renderHome);renderSide();
+}
 var LABS={};
 /* 社會「一句一句看懂」：先想一想（上面），再按「下一句」一句一句看解說；每一句都看過才算完成（沿用 core.js 的 lab 流程：先預測才能操作、完成才換一題確認） */
 LABS.soc=function(box){

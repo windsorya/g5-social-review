@@ -443,6 +443,41 @@ def flow_lab_after_external_clear(browser):
     ctx.close()
 
 
+def flow_lab_done_resume(browser):
+    """#2632 第 2 輪（Codex 審自然站 aa365726 P2，四站同型）：每一步都看完→寫入壞掉→按完成鈕（沒存到）→恢復→補存。
+    第 1 輪 labRefresh 把她留在已完成的頁面、要再按一次完成；更早的版本 route() 甩回首頁。應該：照完成鈕成功時的去向
+    （答錯補救進來＝回練習換一題確認；觀念頁進來＝完成畫面）。"""
+    def open_menu(pg):
+        pg.locator("#concepts .ccard").first.click(); pg.wait_for_selector("#cLab")
+        pg.locator("#cLab").click(); pg.wait_for_selector("#labPredict button[data-g]")
+        pg.locator("#labPredict button[data-g]").first.click(); pg.wait_for_selector("#mNext")
+    phase = """() => { const s = JSON.parse(localStorage.getItem('g5soc.v1') || 'null'); const ids = Object.keys((s && s.labRuns) || {});
+      return ids.length ? s.labRuns[ids[ids.length - 1]].phase : null; }"""
+    for ctxname, opener, how in (("答錯補救進來", enter_lab, "再存一次"), ("答錯補救進來", enter_lab, "切回分頁"), ("觀念頁進來", open_menu, "再存一次")):
+        ctx, pg, errors = open_page(browser, {"viewport": {"width": 390, "height": 844}})
+        opener(pg)
+        k = 0
+        while pg.locator("#mNext").is_visible() and k < 20:
+            pg.locator("#mNext").click(); k += 1
+        pg.evaluate(BREAK_SET); pg.locator("#labDone").click()
+        failed = {"還在學習畫面": pg.locator("#labNav").count() == 1, "再存一次": pg.locator("#retrySave").count() >= 1}
+        pg.evaluate(FIX_SET)
+        if how == "再存一次":
+            pg.locator("#retrySave").first.click()
+        else:
+            pg.evaluate("() => document.dispatchEvent(new Event('visibilitychange'))")
+        ph = pg.evaluate(phase)
+        if ctxname == "答錯補救進來":
+            dest = pg.locator("#main .q").count() == 1
+        else:
+            dest = pg.locator("#main .done").count() == 1 and "看完了" in pg.inner_text("#main")
+        check(f"一句一句看懂（{ctxname}）完成鈕那一下沒存到→恢復→{how}：存成完成、離開學習頁到該去的地方、提示列消失、沒有 JS 錯誤",
+              failed == {"還在學習畫面": True, "再存一次": True} and ph == "complete" and dest and pg.locator("#labNav").count() == 0
+              and pg.locator("#retrySave").count() == 0 and not errors,
+              {"失敗時": failed, "phase": ph, "到該去的地方": dest, "main": pg.inner_text("#main")[:80], "errors": errors})
+        ctx.close()
+
+
 def flow_review(browser):
     ctx, pg, errors = open_page(browser)
     check("小考複習按鈕寫「第 2 單元 臺灣的自然環境與生活」", "第 2 單元 臺灣的自然環境與生活" in pg.locator("#main .review").inner_text(), pg.locator("#main .review").inner_text()[:200])
@@ -531,6 +566,7 @@ def main():
         flow_review(cr)
         flow_redo_after_external_clear(cr)
         flow_lab_after_external_clear(cr)
+        flow_lab_done_resume(cr)
         flow_upload(cr, "社會", "g5-social-review", "G5SocBank")
         cr.close()
         wk = p.webkit.launch()
