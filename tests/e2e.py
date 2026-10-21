@@ -429,6 +429,18 @@ def flow_lab_after_external_clear(browser):
           had_retry and not errors and pg.locator("#labNav").count() == 0 and pg.locator("#goAll").count() == 1 and pg.locator("#retrySave").count() == 0,
           {"先出現再存一次": had_retry, "errors": errors, "main": pg.inner_text("#main")[:80], "再存一次": pg.locator("#retrySave").count()})
     ctx.close()
+    # 三姊妹站 Codex 審 baf22229 第 2 項同型（#2632）：一句存檔失敗 → 回首頁 → 進觀念頁、寫入仍失敗時按「一句一句看懂」（開不成，人還在觀念頁、screen 卻已是 lab）
+    # → 存檔被別處清掉、寫入恢復 → 按「再存一次」：不得把她從觀念頁甩回首頁。
+    ctx, pg, errors = open_page(browser, {"viewport": {"width": 390, "height": 844}})
+    open_lab(pg); mid(pg)
+    pg.evaluate(BREAK_SET); pg.locator("#mNext").click(); pg.locator("#labHome").click()
+    pg.locator("#concepts .ccard").first.click(); pg.wait_for_selector("#cLab"); pg.locator("#cLab").click()
+    on_concept = pg.locator("#cLab").count() == 1 and pg.locator("#labNav").count() == 0
+    pg.evaluate(bg); pg.evaluate(FIX_SET); pg.locator("#retrySave").first.click()
+    check("學習頁沒開成、人還在觀念頁時按「再存一次」（那一輪已被別處清掉）：留在觀念頁、提示列消失、沒有 JS 錯誤",
+          on_concept and not errors and pg.locator("#cLab").count() == 1 and pg.locator("#goAll").count() == 0 and pg.locator("#retrySave").count() == 0,
+          {"先在觀念頁": on_concept, "errors": errors, "main": pg.inner_text("#main")[:80], "再存一次": pg.locator("#retrySave").count()})
+    ctx.close()
 
 
 def flow_review(browser):

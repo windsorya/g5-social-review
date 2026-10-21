@@ -1111,6 +1111,24 @@ test("M7 待存的是一輪實驗的一步、那一輪又被別處刪掉：重�
   assert.deepEqual([S.get().saveStatus, S.get().pendingAction.id], ["failed", T2.id]);
 });
 
+test("M8 待存的一步遇到 NO_RUN 以外的錯誤（同步換成還沒預測的舊快照 → PREDICTION_REQUIRED）：照舊留著待存，換回能套的快照後重試存得進去（三姊妹站 Codex 審 baf22229 第 1 項同型，#2632）", () => {
+  const b = bank(["s1"]); const mem = flakyStorage();
+  const S = C.createStore({ storage: mem, bank: b, clock: () => NOON(D) }); S.load();
+  assert.ok(S.dispatch(op("labStart", { runId: "R", lab: "soc", tasks: 3, answer: 0 })).ok);
+  const beforePredict = mem.raw[C.LS_KEY];
+  assert.ok(S.dispatch(op("labPredict", { runId: "R", choice: 0 })).ok);
+  const afterPredict = mem.raw[C.LS_KEY];
+  mem.setWrite(true); const T1 = op("labTask", { runId: "R", task: 0 });
+  assert.equal(S.dispatch(T1).ok, false); mem.setWrite(false);
+  mem.raw[C.LS_KEY] = beforePredict;
+  const r = S.retry();
+  assert.deepEqual([r.ok, r.error], [false, "PREDICTION_REQUIRED"]);
+  assert.deepEqual([S.get().saveStatus, S.get().pendingAction && S.get().pendingAction.id], ["failed", T1.id], "還可能套得上的待存不得丟掉");
+  mem.raw[C.LS_KEY] = afterPredict;
+  assert.ok(S.retry().ok, "換回能套的快照後重試要存得進去");
+  assert.deepEqual(JSON.parse(mem.raw[C.LS_KEY]).labRuns.R.tasksDone, [0]);
+});
+
 // 補做（2026-10-14 律師：「有辦法補做之前沒做的天數嗎」）——結算制（4agent 4A-20261014-makeup 定案）驗收矩陣
 // 前三版（每次作答決定記到哪天）被 Codex 連 3 輪 FAIL；這裡逐條收錄那些反例（T01–T16）。
 const OLD = require("./fixtures/core.pre-makeup-d7d1d78.js");   // 加補做前、線上那一版核心

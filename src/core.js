@@ -863,7 +863,8 @@
       if (r.error || r.dup) {
         // 重試的就是待存那筆、卻已套不上磁碟現況（例如那一輪被別處刪掉，NO_RUN）：與 flushPending 一樣丟掉，
         // 磁碟讀得到、沒有別的東西等著存，就回到正常狀態——不然「再存一次」按了永遠沒反應、提示列卡著（Codex 審 e195ef98 第 3 項，#1542）
-        if (st.pendingAction && action.id === st.pendingAction.id) {
+        // 只認 NO_RUN（那一輪已不在磁碟上）：其他錯誤（例如同步換成還沒預測的舊快照 → PREDICTION_REQUIRED）之後可能又套得上，照舊留著（三姊妹站 Codex 審 baf22229 第 1 項同型，#2632）
+        if (st.pendingAction && action.id === st.pendingAction.id && (r.dup || r.error === "NO_RUN")) {
           st.pendingAction = null;
           if (r.error && !st.loadError) st.saveStatus = "ok";
         }
