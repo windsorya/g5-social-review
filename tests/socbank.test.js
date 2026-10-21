@@ -235,7 +235,7 @@ test("重複題合併表：被併的題存在、留下的題存在且沒被併�
   });
   assert.deepEqual(bad, []);
   assert.deepEqual(B.CARDS.map((c) => c.id), B.ALL_CARDS.filter((c) => !B.MERGED[c.id] && !(B.RETIRED || {})[c.id]).map((c) => c.id));
-  assert.equal(B.CARDS.length, 77);   // 2026-10-22：102 題－併題 11（c12、g02、c11、g01 改回保留，#2709）－停出 20＋1-1 補題 6（a12～a17）
+  assert.equal(B.CARDS.length, 78);   // 2026-10-22：102 題－併題 10（c12、g02、c11、g01、e11 改回保留，#2709）－停出 20＋1-1 補題 6（a12～a17）
   const n = {}; B.CARDS.forEach((c) => { n[c.concept] = (n[c.concept] || 0) + 1; });
   const thin = Object.keys(B.CONCEPTS).filter((k) => !(n[k] >= 4)).map((k) => k + "=" + (n[k] || 0));
   assert.deepEqual(thin, [], "每個觀念合併後至少 4 題");
@@ -250,7 +250,8 @@ const NOT_DUPLICATE = {
   c12: "c01 沒考「讓大家都一樣有錢」「只用來處罰小孩」（Codex 審 7b9e5fe）",
   g02: "g04 沒考「沙漠氣候」／臺灣雨量多（Codex 審 7b9e5fe）",
   c11: "c03 沒考「法律只管家裡的事」（Codex 審 e61beae）",
-  g01: "g03 沒考「寒帶」「溫帶」（Codex 審 e61beae）"
+  g01: "g03 沒考「寒帶」「溫帶」（Codex 審 e61beae）",
+  e11: "e02＋e03 沒建立臺地和平原誰比較高，排除不了「平原比臺地高」（Codex 審 d9be678）"
 };
 test("重複題合併表：審查判定保留題考不到它的誤解的題，不得再併、照常出題", () => {
   const inCards = new Set(B.CARDS.map((c) => c.id));
