@@ -235,10 +235,29 @@ test("重複題合併表：被併的題存在、留下的題存在且沒被併�
   });
   assert.deepEqual(bad, []);
   assert.deepEqual(B.CARDS.map((c) => c.id), B.ALL_CARDS.filter((c) => !B.MERGED[c.id] && !(B.RETIRED || {})[c.id]).map((c) => c.id));
-  assert.equal(B.CARDS.length, 73);   // 2026-10-19：102 題－併題 15－停出 20＋1-1 補題 6（a12～a17）
+  assert.equal(B.CARDS.length, 75);   // 2026-10-22：102 題－併題 13（c12、g02 改回保留，#2709）－停出 20＋1-1 補題 6（a12～a17）
   const n = {}; B.CARDS.forEach((c) => { n[c.concept] = (n[c.concept] || 0) + 1; });
   const thin = Object.keys(B.CONCEPTS).filter((k) => !(n[k] >= 4)).map((k) => k + "=" + (n[k] || 0));
   assert.deepEqual(thin, [], "每個觀念合併後至少 4 題");
+});
+
+// 2026-10-22（#2709）：被併題的錯誤選項若是保留題沒考到的另一個誤解，就不算重複（socbank.js 合併表檔頭的判準）。
+// 下列題目是 Codex 審查逐題判過「保留題考不到它的誤解」的；再被併掉，她就練不到那個誤解。
+const NOT_DUPLICATE = {
+  d13: "法律全國都要遵守、由總統公布的誤解（Codex 審 51496e7）",
+  f10: "暴雨時河水很快流入大海（Codex 審 51496e7）",
+  g11: "離太陽比較遠、雨比較少的誤解（Codex 審 51496e7）",
+  c12: "c01 沒考「讓大家都一樣有錢」「只用來處罰小孩」（Codex 審 7b9e5fe）",
+  g02: "g04 沒考「沙漠氣候」／臺灣雨量多（Codex 審 7b9e5fe）"
+};
+test("重複題合併表：審查判定保留題考不到它的誤解的題，不得再併、照常出題", () => {
+  const inCards = new Set(B.CARDS.map((c) => c.id));
+  const bad = [];
+  Object.keys(NOT_DUPLICATE).forEach((id) => {
+    if (B.MERGED[id]) bad.push(id + " 又被併到 " + B.MERGED[id].keep.join("、") + "：" + NOT_DUPLICATE[id]);
+    else if (!inCards.has(id) && !(B.RETIRED || {})[id]) bad.push(id + " 不在出題集合");
+  });
+  assert.deepEqual(bad, []);
 });
 
 // ---------- 2026-10-19 範圍稽核（目標：小考／期中考考高分——考不到的不練，課本教的要練得到） ----------
