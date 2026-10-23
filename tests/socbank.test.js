@@ -235,7 +235,7 @@ test("重複題合併表：被併的題存在、留下的題存在且沒被併�
   });
   assert.deepEqual(bad, []);
   assert.deepEqual(B.CARDS.map((c) => c.id), B.ALL_CARDS.filter((c) => !B.MERGED[c.id] && !(B.RETIRED || {})[c.id]).map((c) => c.id));
-  assert.equal(B.CARDS.length, 78);   // 2026-10-22：102 題－併題 10（c12、g02、c11、g01、e11 改回保留，#2709）－停出 20＋1-1 補題 6（a12～a17）
+  assert.equal(B.CARDS.length, 77);   // 2026-10-23：102 題－併題 10（c12、g02、c11、g01、e11 改回保留，#2709）－停出 21（f04 #3034 補停）＋1-1 補題 6（a12～a17）
   const n = {}; B.CARDS.forEach((c) => { n[c.concept] = (n[c.concept] || 0) + 1; });
   const thin = Object.keys(B.CONCEPTS).filter((k) => !(n[k] >= 4)).map((k) => k + "=" + (n[k] || 0));
   assert.deepEqual(thin, [], "每個觀念合併後至少 4 題");
@@ -293,7 +293,7 @@ test("重複題合併表 covers：被併題的每個錯誤選項都寫了由哪�
 // 依據：學校教學重點①（臺灣在世界地圖上的位置，利用相對位置表達周邊海域和鄰國）、康軒新版 1-1～2-2 公開教案、康軒 113 期中卷 3 份
 // （經緯度、北回歸線度數、五大山脈、憲法皆 0 題）。北回歸線本身在 2-2（熱帶／副熱帶），可以出現。
 const OUT_OF_SCOPE = /經度|緯度|東經|北緯|西經|南緯|半球|絕對位置|憲法|經線|緯線|分水嶺/;   // 分水嶺：國中七上用語（f07 停出）
-const RETIRE_OUT = ["a01", "a02", "a08", "a09", "a10", "a11", "a03", "d08", "d09", "d10", "d12", "d02", "f05", "f07", "h13", "b07", "b08"];
+const RETIRE_OUT = ["a01", "a02", "a08", "a09", "a10", "a11", "a03", "d08", "d09", "d10", "d12", "d02", "f04", "f05", "f07", "h13", "b07", "b08"];   // f04：2026-10-23 #3034 補（和 f05 同一個排序理由）
 const RETIRE_CHALLENGE = ["a05", "f02", "f06"];
 
 test("範圍①停出表：RETIRED 的題不排成新卡（不在 CARDS），仍在 ALL_CARDS 照常複習；out／challenge 各有理由", () => {
@@ -350,4 +350,68 @@ test("範圍④影片只收康軒五上或國小通用影片：不收別版本�
   const bad = [];
   Object.keys(V).forEach((k) => (Array.isArray(V[k]) ? V[k] : []).forEach((v) => { if (OTHER.test(v.title + " " + (v.note || ""))) bad.push(k + " " + v.id + "：" + v.title); }));
   assert.deepEqual(bad, []);
+});
+
+// ---------- 2026-10-23 交辦 #3034：Codex 審 cf08dd81（2026-10-20 00:14 收據）兩項內容 FAIL 的守門 ----------
+// 單位＝孩子一次看到的一段字：題目各欄、觀念頁每一行、圖的 aria-label 和圖上文字分開算、先想想看、出口題
+function textUnits(cards) {
+  const out = [];
+  const svg = (who, s) => {
+    const m = /aria-label="([^"]*)"/.exec(s);
+    if (m) out.push([who + " 圖說（aria-label）", m[1]]);
+    out.push([who + " 圖上文字", s.replace(/<[^>]*>/g, "")]);
+  };
+  cards.forEach((c) => [c.q, c.ans, c.why, c.hint].concat(c.opts, c.wrongWhy).forEach((t) => out.push([c.id, t])));
+  CIDS.forEach((k) => {
+    const c = B.CONCEPTS[k];
+    ["title", "short", "exit", "exitAns"].forEach((f) => out.push([k + " 觀念 " + f, c[f]]));
+    X.EXPLAIN[k].forEach((ex, j) => { [ex.name, ex.task, ex.ask].concat(ex.lines).forEach((t) => out.push([k + " 說法" + (j + 1), t])); svg(k + " 說法" + (j + 1), ex.svg()); });
+    const p = X.PREDICT[k]; [p.q, p.why].concat(p.opts).forEach((t) => out.push([k + " 先想想看", t]));
+  });
+  return out.filter((x) => typeof x[1] === "string" && x[1]);
+}
+
+// 國家賠償法第 3 條第 1 項（FACTCHECK law_stateco3）：「公共設施因設置或管理有欠缺，致人民…受損害者，國家應負損害賠償責任。」
+const STATE_COMP = /國家賠償|國家要賠|國家會賠|國賠/;
+const INJURY = /受傷|受損害|損害/;
+const STATE_COMP_COND = /設置或管理有欠缺|沒設好或沒管好/;
+test("內容①說到「受傷→國家賠償」的每一段字都帶成立條件（設置或管理有欠缺），不把單純受傷教成應賠", () => {
+  // 判準自檢：抓得到收據裡的舊說法、放過帶條件的寫法
+  assert.ok(STATE_COMP.test("例：設施害人受傷，國家賠償") && INJURY.test("例：設施害人受傷，國家賠償") && !STATE_COMP_COND.test("例：設施害人受傷，國家賠償"));
+  assert.ok(STATE_COMP_COND.test("公共設施設置或管理有欠缺而害人受傷，國家要賠償"));
+  const bad = textUnits(B.ALL_CARDS).filter((x) => STATE_COMP.test(x[1]) && INJURY.test(x[1]) && !STATE_COMP_COND.test(x[1])).map((x) => x[0] + "：" + x[1].replace(/\s+/g, " ").slice(0, 80));
+  assert.deepEqual(bad, []);
+  // 不是把國賠整段刪掉蒙混過關：1d 觀念頁兩種說法都還講得到國家賠償
+  X.EXPLAIN["1d"].forEach((ex, j) => assert.ok(STATE_COMP.test(ex.svg()), "1d 說法" + (j + 1) + " 的國家賠償例子不見了"));
+});
+
+// 五大山脈由東到西的排序已判為考不到（f05 停出理由）；同一個排序換成「最東邊是哪一條」也一樣
+const RANGE_ORDER = /由東(向|到|往)西|由西(向|到|往)東|最東邊|最西邊/;
+test("範圍⑤五大山脈不教東西排序：f04 和 f05 一起停出；還會出現的題（新卡＋挑戰題到期複習）與觀念頁都不寫山脈排序", () => {
+  assert.ok(RANGE_ORDER.test("由東到西是海岸山脈") && RANGE_ORDER.test("五大山脈裡，最東邊的是哪一條？") && RANGE_ORDER.test("海岸山脈在最東邊。"));
+  assert.ok(!RANGE_ORDER.test("中央山脈北起蘇澳、南到鵝鑾鼻，是本島主幹。") && !RANGE_ORDER.test("日本在臺灣的東北方"), "非排序句不該被擋");
+  const R = B.RETIRED;
+  assert.equal(R.f04 && R.f04.kind, "out", "f04（最東邊是哪一條）沒有和 f05 一起停出");
+  const served = B.ALL_CARDS.filter((c) => !B.MERGED[c.id] && !(R[c.id] && R[c.id].kind === "out"));
+  const hits = textUnits(served).filter((x) => /山脈/.test(x[1]) && RANGE_ORDER.test(x[1])).map((x) => x[0] + "：" + x[1].replace(/\s+/g, " ").slice(0, 80));
+  assert.deepEqual(hits, []);
+  // 觀念頁仍然認得五大山脈的名字（範圍內），只是不背排序
+  const ex = X.EXPLAIN["2b"][0];
+  ["海岸山脈", "中央山脈", "雪山山脈", "玉山山脈", "阿里山山脈"].forEach((n) => assert.ok(ex.svg().indexOf(n) >= 0, "2b 圖少了 " + n));
+});
+
+test("範圍⑥照 app.html 組題庫跑核心：Codex 的重現（空白狀態 pick:fresh、ids:[f04]）佇列不再出 f04", () => {
+  const R = B.RETIRED, active = {}, out = {};
+  B.CARDS.forEach((c) => { active[c.id] = 1; });
+  Object.keys(R).forEach((id) => { if (R[id] && R[id].kind === "out") out[id] = 1; });
+  const bank = { cards: B.ALL_CARDS, active, out, concepts: {}, figs: {} };
+  CIDS.forEach((k) => { bank.concepts[k] = { unit: B.CONCEPTS[k].unit }; });
+  const start = (ids) => C.reduce(C.blankState(), { type: "sessionStart", id: "op-3034-" + ids.join(), kind: "review", pick: "fresh", ids }, { bank, now: Date.parse("2026-10-23T12:00:00+08:00") });
+  // 對照組（探針有牙）：同一條路徑，範圍內的 f03 會排進佇列
+  const ok = start(["f03"]);
+  assert.deepEqual(ok.state && ok.state.session && ok.state.session.queue, ["f03"], "對照組 f03 沒排進佇列，這支測試打不到 review 路徑");
+  const r = start(["f04"]);
+  const q = (r.state && r.state.session && r.state.session.queue) || [];
+  assert.ok(q.indexOf("f04") < 0, "f04 仍被排進佇列：" + JSON.stringify(q));
+  assert.equal(r.error, "REVIEW_EMPTY", "只有 f04 時應該開不了局（全是考不到的題），實際：" + r.error);
 });
