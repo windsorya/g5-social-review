@@ -337,6 +337,23 @@ test("26 植物階段由狀態派生", () => {
   assert.equal(C.view(s, env(b, NOON(D))).stages["1-1"], 2);
 });
 
+test("26b 考不到（kind:out）的題已不再出、學不會，不擋「結果了」；作答紀錄照留（Codex 審 e274169，#3034）", () => {
+  // 停出前她練過 o 一次（goodDays 1 天，到期複習已停）；其他題全畢業、出口通過
+  const b = { cards: [card("s1"), card("o")], concepts: CONCEPTS, figs: FIGS, active: { s1: 1 }, out: { o: 1 } };
+  let s = C.blankState();
+  s.cards.s1 = learned(3, ["2026-10-14", "2026-10-17"], null);
+  s.cards.o = learned(1, ["2026-10-14"], "2026-10-17");
+  s.exits["1-1"] = { status: "pass", due: null, opened: "2026-10-14", last: "2026-10-18" };
+  assert.equal(C.view(s, env(b, NOON(D))).stages["1-1"], 4, "o 考不到又學不會，卡在開花了");
+  assert.equal(s.cards.o.seen, 1, "作答紀錄不刪");
+  // 對照組：o 沒停出（還能到期複習）時，仍要它畢業才結果
+  const b2 = Object.assign({}, b, { active: { s1: 1, o: 1 }, out: {} });
+  assert.equal(C.view(s, env(b2, NOON(D))).stages["1-1"], 3);
+  // 沒練過的 s1 未畢業時，考不到的題不會讓它提早結果
+  s.cards.s1 = learned(1, ["2026-10-17"], "2026-10-20");
+  assert.equal(C.view(s, env(b, NOON(D))).stages["1-1"], 3);
+});
+
 test("27 寫入失敗不宣告完成，恢復後重試只算一次", () => {
   const b = bank(["s1"]); const st = memStorage();
   const store = C.createStore({ storage: st, bank: b, clock: () => NOON(D) }); store.load();
