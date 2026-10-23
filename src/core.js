@@ -277,6 +277,19 @@
     });
     return out;
   }
+  // 錯題站「各科 app 待加強」的題數（交辦 #4027；錯題站 g5-wrong-review docs/app-weak-entry-design-20261019.md 第 2 節）。
+  // 題集＝首頁「小考前想全部練一次」每個單元「練待加強的」會出的題的聯集＝poolCards 裡觀念開放的題（app unitCards 各單元合起來），
+  // 判準一律交給畫面同一支 reviewCounts：weak＝不管今天練過沒的待加強題、weakNow＝今天還能開局的（startable "weak"，今天練過的明天才出）。
+  // challenge＝bank.challenge（停出表 kind:"challenge"；做過的照樣在「練待加強的」出，這裡只分開算）；weak 不含 challenge，兩者合起來就是整群。
+  // out＝考不到的待加強題（reviewCounts 不算、也永遠不出），只給家長對帳。
+  function weakTally(state, bank, day) {
+    var ch = bank.challenge || {};
+    var ids = poolCards(state, bank, day).filter(function (c) { return conceptOn(state, bank, c.concept); }).map(function (c) { return c.id; });
+    var a = reviewCounts(state, bank, ids.filter(function (id) { return !ch[id]; }), day);
+    var b = reviewCounts(state, bank, ids.filter(function (id) { return !!ch[id]; }), day);
+    var out = ids.filter(function (id) { return isOut(bank, id) && weakCard(cardState(state, id)); }).length;
+    return { weak: a.weak, weakToday: a.weakNow, challenge: b.weak, challengeToday: b.weakNow, out: out };
+  }
   // 待協助的觀念排到這一輪最後：先別再刷她卡住的觀念（補救分支三）；穩定排序，其餘順序不動
   function stuckLast(state, bank, ids) {
     var stuck = function (id) { var c = cardById(state, bank, id), h = c && state.help[c.concept]; return h && h.needsHelp ? 1 : 0; };
@@ -957,7 +970,7 @@
     dayKey: dayKey, isDay: isDay, addDays: addDays, diffDays: diffDays, weekday: weekday,
     validCard: validCard, blankState: blankState, reduce: reduce, view: view, endTitle: endTitle, exitList: exitList,
     makeupInProgress: makeupInProgress, makeupUnsettled: makeupUnsettled, checkState: checkState, decode: decode, migrateV1: migrateV1, createStore: createStore,
-    cardState: cardState, cardById: cardById, isActive: isActive, servable: servable, isOut: isOut, poolCards: poolCards, reviewCounts: reviewCounts, reviewPick: reviewPick, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
+    cardState: cardState, cardById: cardById, isActive: isActive, servable: servable, isOut: isOut, poolCards: poolCards, reviewCounts: reviewCounts, reviewPick: reviewPick, weakCard: weakCard, weakTally: weakTally, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
     dissolveNew: dissolveNew, dissolveAddSugar: dissolveAddSugar, dissolveAddSalt: dissolveAddSalt,
     dissolveStep: dissolveStep, dissolveRead: dissolveRead, shadowFromSun: shadowFromSun, dirName: dirName
   };

@@ -36,11 +36,27 @@ def inline(body: str) -> str:
     return out
 
 
+JS_INLINE = re.compile(r"^/\*@INLINE (src/[A-Za-z0-9_.-]+\.js)\*/$", re.M)
+
+
+def weak_export() -> str:
+    """錯題站讀的 weak-export.js（交辦 #4027）：樣板 src/weakexport.js 的 /*@INLINE src/x.js*/ 換成原文。
+    題庫組法與判定都是 app 用的同一份 socbank.js／core.js，不另寫第二份。"""
+    tpl = (ROOT / "src" / "weakexport.js").read_text(encoding="utf-8")
+    out = JS_INLINE.sub(lambda m: (ROOT / m.group(1)).read_text(encoding="utf-8"), tpl)
+    if "@INLINE" in out:
+        raise SystemExit("weak-export.js 還有沒換掉的 @INLINE 標記")
+    return "// 由 build.py 從 src/weakexport.js＋src/socbank.js＋src/core.js 產生，勿手改（交辦 #4027）\n" + out
+
+
 def main() -> None:
     app_src = (ROOT / "src" / "app.html").read_text(encoding="utf-8")
     body = inline(app_src)
     (ROOT / "index.html").write_text(HEAD + body + "</body></html>", encoding="utf-8")
     print(f"built index.html ({len(body)} chars)")
+    we = weak_export()
+    (ROOT / "weak-export.js").write_text(we, encoding="utf-8")
+    print(f"built weak-export.js ({len(we)} chars)")
 
 
 if __name__ == "__main__":

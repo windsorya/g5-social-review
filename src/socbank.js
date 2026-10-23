@@ -516,6 +516,20 @@
   var ALL_CARDS = CARDS;
   CARDS = CARDS.filter(function (c) { return !MERGED[c.id] && !RETIRED[c.id]; });
 
-  var api = { UNITS: UNITS, CONCEPTS: CONCEPTS, ALL_CARDS: ALL_CARDS, MERGED: MERGED, RETIRED: RETIRED, SOURCES: SOURCES, CARDS: CARDS };
+  // 出題用的題庫物件（交辦 #4027）：app（src/app.html）與錯題站讀的 weak-export.js（build.py 產生）都從這裡組，兩邊永遠同一份。
+  // cards＝完整目錄（裁掉、停出的題仍查得到）；active＝能排成新卡的（CARDS）；out＝停出表 kind:"out"（考不到，core isOut 讀它）；
+  // challenge＝停出表 kind:"challenge"（只給 core weakTally 分類；出題規則不讀它，做過的照常在「練待加強的」出）
+  function bank() {
+    var b = { cards: ALL_CARDS, active: {}, out: {}, challenge: {}, concepts: {}, figs: {} };
+    CARDS.forEach(function (c) { b.active[c.id] = 1; });
+    Object.keys(RETIRED).forEach(function (id) {
+      var k = RETIRED[id] && RETIRED[id].kind;
+      if (k === "out") b.out[id] = 1; else if (k === "challenge") b.challenge[id] = 1;
+    });
+    Object.keys(CONCEPTS).forEach(function (k) { b.concepts[k] = { unit: CONCEPTS[k].unit }; });
+    return b;
+  }
+
+  var api = { UNITS: UNITS, CONCEPTS: CONCEPTS, ALL_CARDS: ALL_CARDS, MERGED: MERGED, RETIRED: RETIRED, SOURCES: SOURCES, CARDS: CARDS, bank: bank };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5SocBank = api;
 })(typeof window !== "undefined" ? window : this);

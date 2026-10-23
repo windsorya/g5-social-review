@@ -879,7 +879,21 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
   var ALL_CARDS = CARDS;
   CARDS = CARDS.filter(function (c) { return !MERGED[c.id] && !RETIRED[c.id]; });
 
-  var api = { UNITS: UNITS, CONCEPTS: CONCEPTS, ALL_CARDS: ALL_CARDS, MERGED: MERGED, RETIRED: RETIRED, SOURCES: SOURCES, CARDS: CARDS };
+  // 出題用的題庫物件（交辦 #4027）：app（src/app.html）與錯題站讀的 weak-export.js（build.py 產生）都從這裡組，兩邊永遠同一份。
+  // cards＝完整目錄（裁掉、停出的題仍查得到）；active＝能排成新卡的（CARDS）；out＝停出表 kind:"out"（考不到，core isOut 讀它）；
+  // challenge＝停出表 kind:"challenge"（只給 core weakTally 分類；出題規則不讀它，做過的照常在「練待加強的」出）
+  function bank() {
+    var b = { cards: ALL_CARDS, active: {}, out: {}, challenge: {}, concepts: {}, figs: {} };
+    CARDS.forEach(function (c) { b.active[c.id] = 1; });
+    Object.keys(RETIRED).forEach(function (id) {
+      var k = RETIRED[id] && RETIRED[id].kind;
+      if (k === "out") b.out[id] = 1; else if (k === "challenge") b.challenge[id] = 1;
+    });
+    Object.keys(CONCEPTS).forEach(function (k) { b.concepts[k] = { unit: CONCEPTS[k].unit }; });
+    return b;
+  }
+
+  var api = { UNITS: UNITS, CONCEPTS: CONCEPTS, ALL_CARDS: ALL_CARDS, MERGED: MERGED, RETIRED: RETIRED, SOURCES: SOURCES, CARDS: CARDS, bank: bank };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5SocBank = api;
 })(typeof window !== "undefined" ? window : this);
 
@@ -1658,6 +1672,19 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     });
     return out;
   }
+  // 錯題站「各科 app 待加強」的題數（交辦 #4027；錯題站 g5-wrong-review docs/app-weak-entry-design-20261019.md 第 2 節）。
+  // 題集＝首頁「小考前想全部練一次」每個單元「練待加強的」會出的題的聯集＝poolCards 裡觀念開放的題（app unitCards 各單元合起來），
+  // 判準一律交給畫面同一支 reviewCounts：weak＝不管今天練過沒的待加強題、weakNow＝今天還能開局的（startable "weak"，今天練過的明天才出）。
+  // challenge＝bank.challenge（停出表 kind:"challenge"；做過的照樣在「練待加強的」出，這裡只分開算）；weak 不含 challenge，兩者合起來就是整群。
+  // out＝考不到的待加強題（reviewCounts 不算、也永遠不出），只給家長對帳。
+  function weakTally(state, bank, day) {
+    var ch = bank.challenge || {};
+    var ids = poolCards(state, bank, day).filter(function (c) { return conceptOn(state, bank, c.concept); }).map(function (c) { return c.id; });
+    var a = reviewCounts(state, bank, ids.filter(function (id) { return !ch[id]; }), day);
+    var b = reviewCounts(state, bank, ids.filter(function (id) { return !!ch[id]; }), day);
+    var out = ids.filter(function (id) { return isOut(bank, id) && weakCard(cardState(state, id)); }).length;
+    return { weak: a.weak, weakToday: a.weakNow, challenge: b.weak, challengeToday: b.weakNow, out: out };
+  }
   // 待協助的觀念排到這一輪最後：先別再刷她卡住的觀念（補救分支三）；穩定排序，其餘順序不動
   function stuckLast(state, bank, ids) {
     var stuck = function (id) { var c = cardById(state, bank, id), h = c && state.help[c.concept]; return h && h.needsHelp ? 1 : 0; };
@@ -2338,7 +2365,7 @@ textarea{width:100%;min-height:120px;font-size:16px;border:1px solid var(--line)
     dayKey: dayKey, isDay: isDay, addDays: addDays, diffDays: diffDays, weekday: weekday,
     validCard: validCard, blankState: blankState, reduce: reduce, view: view, endTitle: endTitle, exitList: exitList,
     makeupInProgress: makeupInProgress, makeupUnsettled: makeupUnsettled, checkState: checkState, decode: decode, migrateV1: migrateV1, createStore: createStore,
-    cardState: cardState, cardById: cardById, isActive: isActive, servable: servable, isOut: isOut, poolCards: poolCards, reviewCounts: reviewCounts, reviewPick: reviewPick, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
+    cardState: cardState, cardById: cardById, isActive: isActive, servable: servable, isOut: isOut, poolCards: poolCards, reviewCounts: reviewCounts, reviewPick: reviewPick, weakCard: weakCard, weakTally: weakTally, conceptOn: conceptOn, allCards: allCards, missedDays: missedDays,
     dissolveNew: dissolveNew, dissolveAddSugar: dissolveAddSugar, dissolveAddSalt: dissolveAddSalt,
     dissolveStep: dissolveStep, dissolveRead: dissolveRead, shadowFromSun: shadowFromSun, dirName: dirName
   };
@@ -2357,15 +2384,12 @@ var CONCEPTS = {};
 Object.keys(MB.CONCEPTS).forEach(function(k){var c=MB.CONCEPTS[k];CONCEPTS[k]={unit:c.unit,short:c.short,title:c.title,lab:"soc",tone:c.tone,exit:c.exit,exitAns:c.exitAns};});
 var CIDS = Object.keys(CONCEPTS);
 var SAMPLE = "自編題（未對課本）";
-var FIGS = {};
-var BASE_CARDS = MB.ALL_GENERATED || MB.ALL_CARDS || MB.CARDS;   // 2026-10-18：完整目錄（裁掉的題仍查得到，她練過的照常複習；設計方案③）
-var ALL_CARDS = BASE_CARDS;
-var ACTIVE = {}; MB.CARDS.forEach(function(c){ACTIVE[c.id]=1;});   // 能排成新卡的題
 var MERGED = {}, ANQIN_ALSO = {};
-// 考不到的題（範圍稽核 kind:"out"；#2997 拍板、#3010）：不排新卡、也不排到期複習、不進任何回合；核心讀 BANK.out。挑戰題（challenge）不在此列
-var OUT = {}; (function(R){Object.keys(R).forEach(function(id){if(R[id]&&R[id].kind==="out")OUT[id]=1;});})((typeof MB!=="undefined"&&MB.RETIRED)||window.G5_RETIRED||{});
-var BANK = {cards:ALL_CARDS, active:ACTIVE, out:OUT, concepts:{}, figs:FIGS};
-CIDS.forEach(function(k){BANK.concepts[k]={unit:CONCEPTS[k].unit};});
+// 題庫物件由 src/socbank.js bank() 組（#4027：錯題站讀的 weak-export.js 用同一個函式，題數與「練待加強的」永遠同一份）：
+// cards＝完整目錄（2026-10-18：裁掉的題仍查得到，她練過的照常複習；設計方案③）；active＝能排成新卡的題；
+// out＝考不到的題（範圍稽核 kind:"out"；#2997 拍板、#3010）：不排新卡、也不排到期複習、不進任何回合；核心讀 BANK.out。挑戰題（challenge）不在 out
+var BANK = MB.bank();
+var OUT = BANK.out;
 
 var ERRS = {concept:"還不懂這個觀念", reading:"看錯題目", slip:"知道但選錯了"};
 var STAGE = ["種子","發芽了","長葉了","開花了","結果了"];

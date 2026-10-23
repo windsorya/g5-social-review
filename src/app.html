@@ -330,15 +330,12 @@ var CONCEPTS = {};
 Object.keys(MB.CONCEPTS).forEach(function(k){var c=MB.CONCEPTS[k];CONCEPTS[k]={unit:c.unit,short:c.short,title:c.title,lab:"soc",tone:c.tone,exit:c.exit,exitAns:c.exitAns};});
 var CIDS = Object.keys(CONCEPTS);
 var SAMPLE = "自編題（未對課本）";
-var FIGS = {};
-var BASE_CARDS = MB.ALL_GENERATED || MB.ALL_CARDS || MB.CARDS;   // 2026-10-18：完整目錄（裁掉的題仍查得到，她練過的照常複習；設計方案③）
-var ALL_CARDS = BASE_CARDS;
-var ACTIVE = {}; MB.CARDS.forEach(function(c){ACTIVE[c.id]=1;});   // 能排成新卡的題
 var MERGED = {}, ANQIN_ALSO = {};
-// 考不到的題（範圍稽核 kind:"out"；#2997 拍板、#3010）：不排新卡、也不排到期複習、不進任何回合；核心讀 BANK.out。挑戰題（challenge）不在此列
-var OUT = {}; (function(R){Object.keys(R).forEach(function(id){if(R[id]&&R[id].kind==="out")OUT[id]=1;});})((typeof MB!=="undefined"&&MB.RETIRED)||window.G5_RETIRED||{});
-var BANK = {cards:ALL_CARDS, active:ACTIVE, out:OUT, concepts:{}, figs:FIGS};
-CIDS.forEach(function(k){BANK.concepts[k]={unit:CONCEPTS[k].unit};});
+// 題庫物件由 src/socbank.js bank() 組（#4027：錯題站讀的 weak-export.js 用同一個函式，題數與「練待加強的」永遠同一份）：
+// cards＝完整目錄（2026-10-18：裁掉的題仍查得到，她練過的照常複習；設計方案③）；active＝能排成新卡的題；
+// out＝考不到的題（範圍稽核 kind:"out"；#2997 拍板、#3010）：不排新卡、也不排到期複習、不進任何回合；核心讀 BANK.out。挑戰題（challenge）不在 out
+var BANK = MB.bank();
+var OUT = BANK.out;
 
 var ERRS = {concept:"還不懂這個觀念", reading:"看錯題目", slip:"知道但選錯了"};
 var STAGE = ["種子","發芽了","長葉了","開花了","結果了"];
