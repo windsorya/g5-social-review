@@ -17,15 +17,18 @@
     api: 1,
     key: C.LS_KEY,   // "g5soc.v1"
     links: { weak: null, challenge: null },   // 社會站沒有「直接開練待加強」的網址（只讀 #c/ 與 #sync=）；錯題站就連首頁並附說明
-    // raw＝localStorage 或雲端那份原始字串；nowMs＝Date.now()。讀法與 app 開頁相同（decode：v3 升 v4、checkState 不合法就不讀）
+    // raw＝localStorage 或雲端那份原始字串；nowMs＝Date.now()。讀法與 app 開頁相同（decode：v3 升 v4、checkState 不合法就不讀）。
+    // 判讀途中丟任何例外（例：JSON 裡型別壞掉的欄位讓 checkState 轉字串失敗，Codex 審 bf456d1 P2）一律＝讀不懂，回 {ok:false}，不往外丟
     summarize: function (raw, nowMs) {
-      if (typeof raw !== "string" || typeof nowMs !== "number" || !isFinite(nowMs)) return { ok: false };
-      var d = C.decode(raw, BANK);
-      if (!d.accepted) return { ok: false };
-      var s = d.state, t = C.weakTally(s, BANK, C.dayKey(nowMs)), seen = 0;
-      Object.keys(s.cards).forEach(function (k) { seen += s.cards[k].seen; });
-      return { ok: true, answers: s.log.length, seen: seen, weak: t.weak, weakToday: t.weakToday,
-               challenge: t.challenge, challengeToday: t.challengeToday, out: t.out };
+      try {
+        if (typeof raw !== "string" || typeof nowMs !== "number" || !isFinite(nowMs)) return { ok: false };
+        var d = C.decode(raw, BANK);
+        if (!d.accepted) return { ok: false };
+        var s = d.state, t = C.weakTally(s, BANK, C.dayKey(nowMs)), seen = 0;
+        Object.keys(s.cards).forEach(function (k) { seen += s.cards[k].seen; });
+        return { ok: true, answers: s.log.length, seen: seen, weak: t.weak, weakToday: t.weakToday,
+                 challenge: t.challenge, challengeToday: t.challengeToday, out: t.out };
+      } catch (e) { return { ok: false }; }
     }
   });
 })();

@@ -183,6 +183,11 @@ test("④ 讀不懂的一律回 {ok:false}，不丟例外", () => {
   const cases = ["", "壞掉", "{", "null", "[]", "0", "\"g5\"", "{}", raw(v2), raw(badState), raw(noLog), "{\"v\":4}"];
   for (const c of cases) assert.deepEqual(EXP.summarize(c, NOON(D)), { ok: false }, JSON.stringify(c).slice(0, 40));
   for (const c of [null, undefined, 3, {}, []]) assert.deepEqual(EXP.summarize(c, NOON(D)), { ok: false });
+  // Codex 審 bf456d1 P2：純 JSON 型別壞掉也會讓判讀途中丟例外（concept 是帶 toString:null 的物件 ⇒ 轉字串 TypeError）⇒ 一律 {ok:false}
+  const thrower = C.blankState();
+  thrower.extra = [{ id: "x1", concept: { toString: null }, type: "choice", q: "合成題", opts: ["甲", "乙"], a: 0 }];
+  const t2 = C.blankState(); t2.cards = { a04: { seen: 1, goodDays: { toString: null }, blockedDay: null, due: null } };
+  for (const s of [thrower, t2]) assert.deepEqual(EXP.summarize(raw(s), NOON(D)), { ok: false });
   for (const n of [NaN, Infinity, undefined, "1"]) assert.deepEqual(EXP.summarize(raw(fixed()), n), { ok: false });
 });
 
