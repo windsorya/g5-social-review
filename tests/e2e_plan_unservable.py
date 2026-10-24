@@ -5,6 +5,8 @@
   B ② a、b 都做完：首頁大標題「今天能做的卡片都做完了」，並說明有題目「已停出或不在題庫，不用做」，不說「全部完成」
   ④ 計畫只有 x、零作答：首頁說「今天排的題都不用做了」，沒有開空回合的按鈕（Codex 審 545ead0 F4）
   ⑤ 只答過考不到（out）的題：「考考爸媽」不拿它出題（F1；數學站沒有 out 題就跳過）
+  ⑧ B 的家長摘要：「今天卡片：2 / 2 張（完成）（另有 1 張…不用做）」，分母不含停出的 x（#3033 F5；自然站 3af61f9 照搬三站）
+  ⑦ 今天只答對考不到的題、以前答對過能做的題：「考考爸媽」改拿以前那題出（F8；不是說「先練幾張卡」）
   ③ 頁面沒有 JS 錯誤
 自然、數學、國語、社會四站同一支（題庫取法同 tests/e2e_review_no_repeat.py；x＝目錄裡第一張 active 以外的題）。
 執行：python3.12 tests/e2e_plan_unservable.py
@@ -20,10 +22,13 @@ URL = (ROOT / "index.html").as_uri()
 D = "2026-10-20"
 SEED_JS = ("(function(C,all,active,done,outs){var x=all.filter(function(c){return !active[c.id];})[0],ok=all.filter(function(c){return active[c.id];}).slice(0,2);"
            "var s=C.blankState();s.settings.unit3=true;var ids=[x.id,ok[0].id,ok[1].id];"
-           "if(done==='allskip'||done==='teach')ids=[x.id];"   # 考考爸媽的按鈕在「不用做／完成」的首頁
+           "if(done==='allskip'||done==='teach'||done==='teach2')ids=[x.id];"   # 考考爸媽的按鈕在「不用做／完成」的首頁
            "s.days['" + D + "']={planIds:ids,doneIds:[],touched:[],extraDone:false,labRuns:0,teach:0,mood:null};"
            "var o=outs.length?all.filter(function(c){return c.id===outs[0];})[0]:null;"
            "if(done==='teach'&&o){s.cards[o.id]={seen:1,goodDays:['" + D + "'],blockedDay:null,due:'2026-10-23'};s.log=[{op:'seedT',d:'" + D + "',card:o.id,c:o.concept,ok:true,hint:false,unsure:false,variation:false,first:true}];s.ops=['seedT'];}"
+           "if(done==='teach2'&&o){var h=ok[0];s.cards[o.id]={seen:1,goodDays:['" + D + "'],blockedDay:null,due:'2026-10-23'};s.cards[h.id]={seen:1,goodDays:['2026-10-19'],blockedDay:null,due:'2026-10-22'};"
+           "s.days['2026-10-19']={planIds:[h.id],doneIds:[h.id],touched:[h.id],extraDone:false,labRuns:0,teach:0,mood:null};"
+           "s.log=[{op:'seedH',d:'2026-10-19',card:h.id,c:h.concept,ok:true,hint:false,unsure:false,variation:false,first:true},{op:'seedT',d:'" + D + "',card:o.id,c:o.concept,ok:true,hint:false,unsure:false,variation:false,first:true}];s.ops=['seedH','seedT'];}"
            "if(done===true){ok.forEach(function(c){s.cards[c.id]={seen:1,goodDays:['" + D + "'],blockedDay:null,due:'2026-10-23'};"
            "s.days['" + D + "'].doneIds.push(c.id);s.days['" + D + "'].touched.push(c.id);});}"
            "var e=C.checkState(s,{cards:all,concepts:new Proxy({},{get:function(){return {unit:'1'};}}),figs:{}});"
@@ -70,7 +75,7 @@ def open_page(b, vp, d):
 
 
 def main():
-    a, b_done, skip, teach = seed_state(False), seed_state(True), seed_state("allskip"), seed_state("teach")
+    a, b_done, skip, teach, teach2 = seed_state(False), seed_state(True), seed_state("allskip"), seed_state("teach"), seed_state("teach2")
     with sync_playwright() as p:
         for eng, vp in ((p.chromium, {"width": 1280, "height": 900}), (p.webkit, {"width": 820, "height": 1180}), (p.chromium, {"width": 390, "height": 844})):
             br = eng.launch()
@@ -87,6 +92,9 @@ def main():
             home = pg.inner_text("#main")
             check(f"{tag} ② 能做的做完：大標題「今天能做的卡片都做完了」、說明已停出或不在題庫、不說全部完成",
                   "今天能做的卡片都做完了" in home and "已停出或不在題庫" in home and "全部完成" not in home and "今天的卡片都做完了" not in home, home[:200])
+            pg.locator("#parentBox summary").click()
+            summ = pg.inner_text("#summary")
+            check(f"{tag} ⑧ 家長摘要分母只算能做的（2 / 2，停出 1 張另列）", "2 / 2 張（完成）" in summ and "2 / 3" not in summ and "另有 1 張" in summ, summ[:200])
             check(f"{tag} ③ 沒有 JS 錯誤（B）", not errs, errs)
             ctx.close()
             # ④ #3010 F4：今天排的題全部做不了、也沒作答——說明不用做、沒有開空回合的按鈕
@@ -101,6 +109,13 @@ def main():
                 m = pg.inner_text("#main")
                 check(f"{tag} ⑤ 考考爸媽不出 out 題 {teach['out']}", "先練幾張卡" in m, m[:160])
                 check(f"{tag} ⑥ 沒有 JS 錯誤（考考爸媽）", not errs, errs)
+                ctx.close()
+                # ⑦ #3010 F8：今天答對的只有 out 題，要退回以前答對過、現在還能做的題（先排除 out 再選今天／歷史）
+                ctx, pg, errs = open_page(br, vp, teach2)
+                pg.get_by_role("button", name="考考爸媽").first.click()
+                m = pg.inner_text("#main")
+                check(f"{tag} ⑦ 考考爸媽改拿以前答對的 {teach2['ok'][0]} 出題（不說先練幾張卡）", "換你當小老師" in m and "先練幾張卡" not in m, m[:160])
+                check(f"{tag} ⑦ 沒有 JS 錯誤（考考爸媽 F8）", not errs, errs)
                 ctx.close()
             br.close()
     print(f"\n{'ALL PASS' if not FAILS else str(len(FAILS)) + ' FAIL'}")
