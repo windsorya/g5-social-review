@@ -92,8 +92,9 @@ def main():
             # ⑥ 2026-10-14 律師（孩子要「直接闖關」）：點地圖的站 → 觀念頁標題下面、說明之前就有「直接闖關」，按下去開始這一站全部題目
             pg.locator(f'#mapBox .stn[data-cid="{d["ids"][1]}"]').click()
             pg.wait_for_selector("#cGo")
-            gy = pg.locator("#cGo").bounding_box()["y"]
-            ey = pg.locator("#main .remedy").first.bounding_box()["y"] if pg.locator("#main .remedy").count() else 1e9
+            # 同一影格一次量兩個座標：觀念頁開啟時會平滑捲動，分兩次 bounding_box() 量，中間頁面還在動就會量反（負載高時偶發紅）
+            gy, ey = pg.evaluate("""() => { const g = document.querySelector('#cGo'), e = document.querySelector('#main .remedy');
+              return [g.getBoundingClientRect().top, e ? e.getBoundingClientRect().top : 1e9]; }""")
             pg.locator("#cGo").click()
             pg.wait_for_selector("#main .q")
             qh = pg.locator("#main .qhead").inner_text()
