@@ -2736,9 +2736,11 @@ function renderConcept(cid){
 // #3612 第 2 輪（Codex 審 cb686f3 P2）：補存成功後只換掉內容變了的區塊（階段、陪看提示、直接闖關、按鈕列）；
 // 說明（含已換的第二種說法）與影片原地不動、也不捲動——整頁重畫會把說法換回第一種、關掉正在播的影片、捲回頁首
 function refreshConcept(cid){
-  var el=$("#main"), box=el.firstElementChild;
-  if(!box||!$("#cLab")) return renderConcept(cid);
-  var tmp=document.createElement("div"), alt=!!($("#cMore")&&$("#cMore").hidden), olds={}, prev=null;
+  // 第 3 輪（Codex 審第 2 輪 P2）：容器用 #cPage 找，不拿 #main 第一個子節點——toast 會插在 #main 最前面，
+  // 提示還在時補存，第 2 輪把新內容塞進提示裡、說明與按鈕各長出第二份；守衛也只認容器裡的 #cLab
+  var box=$("#cPage");
+  if(!box||!box.querySelector("#cLab")) return renderConcept(cid);
+  var more=box.querySelector("#cMore"), tmp=document.createElement("div"), alt=!!(more&&more.hidden), olds={}, prev=null;
   function key(n){return n.id||(n.matches(".remedy")?"remedy":n.matches(".vids")?"vids":n.className||n.tagName);}
   function reading(k){return k==="remedy"||k==="vids";}
   tmp.innerHTML=conceptHtml(cid);
@@ -2750,7 +2752,7 @@ function refreshConcept(cid){
     prev=n;
   });
   Object.keys(olds).forEach(function(k){if(!reading(k))olds[k].remove();});
-  if(alt&&$("#cMore")) $("#cMore").hidden=true;
+  if(alt&&box.querySelector("#cMore")) box.querySelector("#cMore").hidden=true;
   wireConcept(cid,box);
 }
 // 觀念頁的內容（只讀存檔、不動畫面）：renderConcept 整頁畫；refreshConcept 拿來比對要換哪幾塊
@@ -2758,7 +2760,7 @@ function conceptHtml(cid){
   var c=CONCEPTS[cid], v=V(), ex=EXPLAIN[cid][0];
   var cst=reviewStats(conceptCards(cid));   // 闖關只出還沒做過的（2026-10-19，和單元同一判準）
   var mine=v.remainingIds.filter(function(id){var k=card(id);return k&&k.concept===cid;}).length, stuck=v.needsHelp.indexOf(cid)>=0;
-  return '<div style="display:grid;gap:14px"><div class="qhead"><span>'+esc(UNITS[c.unit])+'</span><span>'+STAGE[v.stages[cid]]+'</span></div><h2>'+esc(c.title)+'</h2>'+
+  return '<div id="cPage" style="display:grid;gap:14px"><div class="qhead"><span>'+esc(UNITS[c.unit])+'</span><span>'+STAGE[v.stages[cid]]+'</span></div><h2>'+esc(c.title)+'</h2>'+
     (stuck?'<div class="banner info"><strong>這個觀念先和爸媽一起看圖解</strong><span class="small">爸媽在「家長摘要」按「已經陪她看過」以後，再來練這個觀念的題目。</span></div>':'')+
     // 2026-10-14 律師（孩子要「直接闖關」）：標題下面就放闖關鈕＝練這個觀念的全部題目；做完全部＝地圖走過這一站
     (stuck?'':'<div class="row" id="cGoRow">'+(cst.fresh?'<button class="btn" type="button" id="cGo">直接闖關：'+(cst.seen?'還有 '+cst.fresh+' 題沒做':'做完這 '+cst.fresh+' 題')+'</button>':cst.seen>=cst.total?'<b>這一站每題都做過了</b>':'<b>這一站沒有新題了</b>')+'<span class="small muted">'+esc((MAPX&&MAPX.RULE)||"")+'</span></div>')+

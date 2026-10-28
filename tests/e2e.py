@@ -509,6 +509,22 @@ def flow_concept_retry_stays(browser):
           and pg.locator("#cLab").count() == 1 and pg.locator("#retrySave").count() == 0 and not errors,
           {"先失敗": failed, "補存前": n0, "補存後": n1, "卡": c["id"], "errors": errors})
     ctx.close()
+    # 第 3 輪（Codex 審第 2 輪 P2）：觀念頁上寫入仍壞時按「直接闖關」會跳提示（toast 插在 #main 最前面、3.5 秒後才消失）；
+    # 提示還在就恢復並「再存一次」：只更新觀念頁容器本身——第 2 輪把 #main 第一個子節點（提示）當容器，說明、按鈕各長出第二份、題數不更新
+    ctx, pg, errors = open_page(browser, {"viewport": {"width": 390, "height": 844}})
+    pg.locator("#goAll").click(); pg.wait_for_selector("#main .q")
+    pg.evaluate(BREAK_SET); c, _ = answer(pg, True)
+    pg.locator(f'#concepts .ccard[data-cid="{c["concept"]}"]').click(); pg.wait_for_selector("#cLab")
+    n0 = pg.evaluate(GO_LEFT)
+    pg.locator("#cGo").click(); toasted = pg.locator("#main > .hint").count() >= 1   # toast 是 #main 的直屬子節點；觀念頁自己的提示都包在容器裡
+    pg.evaluate(FIX_SET); pg.locator("#retrySave").first.click(); pg.wait_for_timeout(300)
+    still = pg.locator("#main > .hint").count() >= 1   # 補存當下提示還沒消失＝受審情境成立
+    n1 = pg.evaluate(GO_LEFT)
+    cnt = pg.evaluate("() => ['#cLab', '#cMore', '#main .remedy', '#cGo'].map(s => document.querySelectorAll(s).length)")
+    check("觀念頁按「直接闖關」沒存到跳提示→提示還在就恢復→「再存一次」：說明與按鈕各一份不重複、留在觀念頁、「直接闖關」題數跟著少一題",
+          toasted and still and cnt == [1, 1, 1, 1] and n0 is not None and n1 == n0 - 1 and pg.locator("#retrySave").count() == 0 and not errors,
+          {"跳提示": toasted, "補存時提示還在": still, "各幾份(cLab,cMore,remedy,cGo)": cnt, "補存前": n0, "補存後": n1, "errors": errors})
+    ctx.close()
     # 第 2 輪：區塊會出現／消失——觀念頁顯示「先和爸媽一起看圖解」時，家長在側欄按「已經陪她看過」沒存到 → 恢復 →「再存一次」：
     # 陪看提示要拿掉、「直接闖關」列要長出來（refreshConcept 的插入新區塊／移除舊區塊兩條路；自然站 e2e_v3 同名 flow 同一條）
     ctx, pg, errors = open_page(browser, {"viewport": {"width": 390, "height": 844}})
