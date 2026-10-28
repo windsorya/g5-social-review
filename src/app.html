@@ -507,10 +507,13 @@ function renderMap(){
 }
 /* ---------- 首頁 ---------- */
 var screen="home", booted=false;   // booted：開頁那一次 openFromHash 之後才為 true（回首頁才清 #c/ 網址）
+var shownCid=null;   // 觀念頁正在看哪一個觀念（renderConcept 記下）：route() 照存檔重繪同一頁用
 function route(){
   var v=V(), se=v.session;
   if(screen==="practice"&&se&&se.queue.length&&!se.halted) return renderPractice();
   if(screen==="practice"||screen==="end") return renderEnd();
+  // #3612（四站同型）：觀念頁按「再存一次」存成功後留在同一個觀念頁（舊版一律 renderHome，她被送回首頁）；觀念已不開放才回首頁
+  if(screen==="concept"&&shownCid&&conceptOn(shownCid)) return renderConcept(shownCid);
   return renderHome();
 }
 function renderHome(){
@@ -670,7 +673,7 @@ function toast(t){var el=$("#main"),d=document.createElement("div");d.className=
 /* ---------- 觀念頁（概念入口） ---------- */
 function conceptCards(cid){return C.poolCards(S(),BANK,V().today).filter(function(c){return c.concept===cid;}).map(function(c){return c.id;});}
 function renderConcept(cid){
-  screen="concept"; leaveLab();
+  screen="concept"; shownCid=cid; leaveLab();
   var c=CONCEPTS[cid], v=V(), ex=EXPLAIN[cid][0];
   var cst=reviewStats(conceptCards(cid));   // 闖關只出還沒做過的（2026-10-19，和單元同一判準）
   var mine=v.remainingIds.filter(function(id){var k=card(id);return k&&k.concept===cid;}).length, stuck=v.needsHelp.indexOf(cid)>=0;
@@ -801,7 +804,7 @@ function submit(c,ok,m,selfGraded){
 function retrySave(){
   var rr=store.retry(); banners();
   // 待存的是這一輪的一步、這一輪卻已被別處刪掉：照磁碟現況回首頁（Codex 審 e195ef98 第 3 項，#1542）。
-  // 要學習頁真的開著（lab 不是 null）：openLab 在 labStart 成功前就把 screen 設成 "lab"，開不成時人還在原畫面（三姊妹站 Codex 審 baf22229 第 2 項同型，#2632）
+  // 要學習頁真的開著（lab 不是 null；三姊妹站 Codex 審 baf22229 第 2 項同型，#2632）。#3612 起 openLab 開成才把 screen 設成 "lab"，lab&& 留著當保險
   if(screen==="lab"&&lab&&labGone(rr)) return;
   var f=$("#saveFail");
   if(f&&pending){ if(store.accepted(pending.a.id)){f.remove();feedback(pending,(rr&&rr.info)||{});} return; }
@@ -989,10 +992,11 @@ function stopAnim(){if(labTimer){cancelAnimationFrame(labTimer);labTimer=null;}}
 function leaveLab(){stopAnim();lab=null;showMap(false);}   // 地圖只在首頁出現：其他畫面都先經過這裡（renderHome 之後會再打開）
 var lab=null;
 function openLab(cid,ctx){
-  stopAnim(); showMap(false); screen="lab";
+  stopAnim(); showMap(false);
   var con=CONCEPTS[cid], key=con.lab, pr=PREDICT[cid], tasks=EXPLAIN[cid][0].lines.map(function(t,i){return "看懂第 "+(i+1)+" 句："+t;}), runId=newId("r");
   var r=act({type:"labStart",runId:runId,lab:key,tasks:tasks.length,answer:pr.a,from:ctx.from,card:ctx.card||undefined});
-  if(!r.ok) return;
+  if(!r.ok) return;   // 開不成：人還在原畫面（觀念頁／練習），screen 也照舊——#3612：舊版先設 "lab"，之後「再存一次」存成功被 route() 送回首頁
+  screen="lab";
   lab={runId:runId,cid:cid,key:key,ctx:ctx,pr:pr,tasks:tasks};
   var el=$("#main");
   el.innerHTML='<div class="lab"><h2>一句一句看懂：'+esc(con.title)+'</h2><div class="task" id="labPredict"></div><div id="labBody" hidden></div><div class="task" id="labTask" hidden></div><div class="row" id="labNav"></div></div>';

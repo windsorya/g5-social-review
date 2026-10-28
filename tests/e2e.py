@@ -443,6 +443,38 @@ def flow_lab_after_external_clear(browser):
     ctx.close()
 
 
+RUNS_DONE = """() => { const s = JSON.parse(localStorage.getItem('g5soc.v1') || 'null');
+  return s ? Object.values(s.labRuns || {}).map(r => r.tasksDone.slice().sort()) : null; }"""
+H2_TEXT = "() => { const h = document.querySelector('#main h2'); return h ? h.textContent : ''; }"   # 回首頁時沒有 h2：不等 30 秒、不丟例外
+
+
+def flow_concept_retry_stays(browser):
+    """#3612（四站同型，數學站同名 flow 照搬）：學習頁一步存檔失敗 → 回首頁 → 進觀念頁 → 恢復寫入 → 在觀念頁按上方「再存一次」。
+    舊版存成功後 route() 只認練習／結束畫面、其餘一律 renderHome，她被從觀念頁送回首頁。應該：留在同一個觀念頁、那一步有存到、提示列消失。
+    第二條：回到觀念頁、寫入仍失敗時先按「一句一句看懂」（開不成）再恢復——舊版 openLab 開不成也把畫面記成學習頁，按「再存一次」一樣被送回首頁
+    （flow_lab_after_external_clear 最後一條是同一路徑但那一輪已被別處清掉、存檔回 NO_RUN；這裡是存得進去的情形）。"""
+    for name, press_lab in [("回首頁再進觀念頁", False), ("回首頁再進觀念頁、寫入仍失敗時先按「一句一句看懂」（開不成）", True)]:
+        ctx, pg, errors = open_page(browser, {"viewport": {"width": 390, "height": 844}})
+        cards = pg.locator("#concepts .ccard")
+        cards.nth(1).click(); pg.wait_for_selector("#cLab"); pg.locator("#cLab").click()
+        pg.wait_for_selector("#labPredict button[data-g]"); pg.locator("#labPredict button[data-g]").first.click()
+        pg.evaluate(BREAK_SET); pg.locator("#mNext").click(); pg.locator("#labHome").click()
+        cards.nth(1).click(); pg.wait_for_selector("#cLab")
+        title = pg.evaluate(H2_TEXT)
+        if press_lab:
+            pg.locator("#cLab").click()
+        before = {"在觀念頁": pg.locator("#cLab").count() == 1 and pg.locator("#labNav").count() == 0, "再存一次": pg.locator("#retrySave").count()}
+        pg.evaluate(FIX_SET); pg.locator("#retrySave").first.click(); pg.wait_for_timeout(300)
+        runs = pg.evaluate(RUNS_DONE)
+        after = {"在觀念頁": pg.locator("#cLab").count() == 1 and pg.locator("#labNav").count() == 0, "同一個觀念": bool(title) and pg.evaluate(H2_TEXT) == title,
+                 "在首頁": pg.locator("#goAll").count() == 1, "再存一次": pg.locator("#retrySave").count()}
+        check(f"觀念頁按「再存一次」存成功（{name}）：留在同一個觀念頁、那一步有存到、提示列消失、沒有 JS 錯誤",
+              before == {"在觀念頁": True, "再存一次": 1} and after == {"在觀念頁": True, "同一個觀念": True, "在首頁": False, "再存一次": 0}
+              and runs is not None and [0] in runs and not errors,
+              {"按之前": before, "按之後": after, "runs": runs, "errors": errors, "main": pg.inner_text("#main")[:80]})
+        ctx.close()
+
+
 def flow_lab_done_resume(browser):
     """#2632 第 2 輪（Codex 審自然站 aa365726 P2，四站同型）：每一步都看完→寫入壞掉→按完成鈕（沒存到）→恢復→補存。
     第 1 輪 labRefresh 把她留在已完成的頁面、要再按一次完成；更早的版本 route() 甩回首頁。應該：照完成鈕成功時的去向
@@ -567,6 +599,7 @@ def main():
         flow_redo_after_external_clear(cr)
         flow_lab_after_external_clear(cr)
         flow_lab_done_resume(cr)
+        flow_concept_retry_stays(cr)
         flow_upload(cr, "社會", "g5-social-review", "G5SocBank")
         cr.close()
         wk = p.webkit.launch()
