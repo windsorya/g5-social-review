@@ -978,13 +978,17 @@
   };
   var ALL_CARDS = CARDS;
   CARDS = CARDS.filter(function (c) { return !MERGED[c.id] && !RETIRED[c.id]; });
+  // 2026-11-01 律師：「為何進度消失了 孩子都已經完成」⇒ 安親班期中考前卷（set:"mid"）是選練題：不在 CARDS（active），沒做過的不算進觀念進度、地圖、單元題數、每日計畫；只從自己那顆按鈕出（bank().optional，core allowedIn）
+  var MID_CARDS = CARDS.filter(function (c) { return c.set === "mid"; });
+  CARDS = CARDS.filter(function (c) { return c.set !== "mid"; });
 
   // 出題用的題庫物件（交辦 #4027）：app（src/app.html）與錯題站讀的 weak-export.js（build.py 產生）都從這裡組，兩邊永遠同一份。
   // cards＝完整目錄（裁掉、停出的題仍查得到）；active＝能排成新卡的（CARDS）；noDaily＝安親班期中考前複習卷的題（只從按鈕出，不排進每日計畫）；out＝停出表 kind:"out"（考不到，core isOut 讀它）；
   // challenge＝停出表 kind:"challenge"（只給 core weakTally 分類；出題規則不讀它，做過的照常在「練待加強的」出）
   function bank() {
-    var b = { cards: ALL_CARDS, active: {}, out: {}, challenge: {}, noDaily: {}, concepts: {}, figs: {} };
-    CARDS.forEach(function (c) { b.active[c.id] = 1; if (c.set === "mid") b.noDaily[c.id] = 1; });
+    var b = { cards: ALL_CARDS, active: {}, optional: {}, out: {}, challenge: {}, noDaily: {}, concepts: {}, figs: {} };
+    CARDS.forEach(function (c) { b.active[c.id] = 1; });
+    MID_CARDS.forEach(function (c) { b.optional[c.id] = 1; b.noDaily[c.id] = 1; });
     Object.keys(RETIRED).forEach(function (id) {
       var k = RETIRED[id] && RETIRED[id].kind;
       if (k === "out") b.out[id] = 1; else if (k === "challenge") b.challenge[id] = 1;
@@ -993,6 +997,6 @@
     return b;
   }
 
-  var api = { UNITS: UNITS, CONCEPTS: CONCEPTS, ALL_CARDS: ALL_CARDS, MERGED: MERGED, RETIRED: RETIRED, SOURCES: SOURCES, CARDS: CARDS, bank: bank };
+  var api = { UNITS: UNITS, CONCEPTS: CONCEPTS, ALL_CARDS: ALL_CARDS, MERGED: MERGED, RETIRED: RETIRED, SOURCES: SOURCES, CARDS: CARDS, MID_CARDS: MID_CARDS, bank: bank };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5SocBank = api;
 })(typeof window !== "undefined" ? window : this);

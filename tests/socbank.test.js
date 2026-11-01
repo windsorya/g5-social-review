@@ -234,8 +234,8 @@ test("重複題合併表：被併的題存在、留下的題存在且沒被併�
     });
   });
   assert.deepEqual(bad, []);
-  assert.deepEqual(B.CARDS.map((c) => c.id), B.ALL_CARDS.filter((c) => !B.MERGED[c.id] && !(B.RETIRED || {})[c.id]).map((c) => c.id));
-  assert.equal(B.CARDS.length, 185);   // 2026-11-01：77＋安親班期中考前複習卷改寫題 108（m01～m108，set:"mid"）＝185。原註： 2026-10-23：102 題－併題 10（c12、g02、c11、g01、e11 改回保留，#2709）－停出 21（f04 #3034 補停）＋1-1 補題 6（a12～a17）
+  assert.deepEqual(B.CARDS.map((c) => c.id), B.ALL_CARDS.filter((c) => !B.MERGED[c.id] && !(B.RETIRED || {})[c.id] && c.set !== "mid").map((c) => c.id));
+  assert.equal(B.CARDS.length, 77);   // 2026-11-01：安親班期中考前卷 108 題是選練題（B.MID_CARDS），不在 CARDS，維持 77（律師：「為何進度消失了」）。原註： 2026-10-23：102 題－併題 10（c12、g02、c11、g01、e11 改回保留，#2709）－停出 21（f04 #3034 補停）＋1-1 補題 6（a12～a17）
   const n = {}; B.CARDS.forEach((c) => { n[c.concept] = (n[c.concept] || 0) + 1; });
   const thin = Object.keys(B.CONCEPTS).filter((k) => !(n[k] >= 4)).map((k) => k + "=" + (n[k] || 0));
   assert.deepEqual(thin, [], "每個觀念合併後至少 4 題");
@@ -417,18 +417,22 @@ test("範圍⑥照 app.html 組題庫跑核心：Codex 的重現（空白狀態 
 });
 
 // 2026-11-01 律師：安親班期中考前複習卷（10/31）另開按鈕抽考，「每日新題的數量不要變」
-test("期中考前複習卷：set:mid 的題進 active（按鈕出得到）、不排進每日計畫（bank().noDaily），每日計畫和沒有這些題時一樣", () => {
+test("期中考前複習卷：set:mid 是選練題（bank().optional、不在 active）：按鈕出得到、不排進每日計畫、不算進進度（做完原本題目的孩子不倒退）", () => {
   const b = B.bank(), mids = B.ALL_CARDS.filter((c) => c.set === "mid");
   assert.equal(mids.length, 108);
-  assert.ok(mids.every((c) => b.active[c.id] && b.noDaily[c.id] && c.from === "改寫自安親班期中考前複習卷（10/31）"));
+  assert.ok(mids.every((c) => !b.active[c.id] && b.optional[c.id] && c.from === "改寫自安親班期中考前複習卷（10/31）"));
+  assert.equal(B.MID_CARDS.length, 108);
+  // 進度不倒退：原本題目全做過 ⇒ poolCards 只含原本的題（沒做過的期中卷題不進分母）
+  const sAll = C.blankState(); B.CARDS.forEach((c) => { sAll.cards[c.id] = { seen: 1, goodDays: ["2026-10-20"], blockedDay: null, due: "2026-11-20" }; });
+  const pool = C.poolCards(sAll, b, "2026-11-01");
+  assert.ok(pool.every((c) => c.set !== "mid"), "沒做過的期中卷題算進了進度分母（進度會倒退）");
+  assert.ok(pool.every((c) => sAll.cards[c.id] && sAll.cards[c.id].seen > 0), "原本全做過，進度卻有沒做過的題");
   // 原本的題大多已練過（只剩 5 張沒練）：沒有 noDaily 時，配額＝max(5, 沒練過的÷剩下天數) 會被 108 張期中卷題撐大
   const s0 = C.blankState();
   B.CARDS.filter((c) => c.set !== "mid").slice(5).forEach((c) => { s0.cards[c.id] = { seen: 1, goodDays: ["2026-10-20"], blockedDay: null, due: "2026-11-20" }; });
   const plan = (bank) => { const r = C.reduce(s0, { type: "tick", id: "t-mid" }, { bank, now: Date.parse("2026-11-02T12:00:00+08:00") }); return r.state.days["2026-11-02"].planIds; };
   const noMid = Object.assign({}, b, { cards: B.ALL_CARDS.filter((c) => c.set !== "mid") });
   assert.deepEqual(plan(b), plan(noMid), "加了期中卷題，每日計畫變了");
-  // 對照組（探針有牙）：拿掉 noDaily，期中卷題就會擠進每日計畫
-  assert.ok(plan(Object.assign({}, b, { noDaily: {} })).some((id) => /^m\d/.test(id)), "對照組沒有排到期中卷題，這條測不到東西");
   const r = C.reduce(C.blankState(), { type: "sessionStart", id: "op-mid", kind: "review", pick: "fresh", ids: mids.map((c) => c.id), size: 20 }, { bank: b, now: Date.parse("2026-11-02T12:00:00+08:00") });
   assert.equal(r.state.session.queue.length, 20, "期中卷按鈕開不了局：" + r.error);
 });

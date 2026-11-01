@@ -990,13 +990,17 @@
   };
   var ALL_CARDS = CARDS;
   CARDS = CARDS.filter(function (c) { return !MERGED[c.id] && !RETIRED[c.id]; });
+  // 2026-11-01 律師：「為何進度消失了 孩子都已經完成」⇒ 安親班期中考前卷（set:"mid"）是選練題：不在 CARDS（active），沒做過的不算進觀念進度、地圖、單元題數、每日計畫；只從自己那顆按鈕出（bank().optional，core allowedIn）
+  var MID_CARDS = CARDS.filter(function (c) { return c.set === "mid"; });
+  CARDS = CARDS.filter(function (c) { return c.set !== "mid"; });
 
   // 出題用的題庫物件（交辦 #4027）：app（src/app.html）與錯題站讀的 weak-export.js（build.py 產生）都從這裡組，兩邊永遠同一份。
   // cards＝完整目錄（裁掉、停出的題仍查得到）；active＝能排成新卡的（CARDS）；noDaily＝安親班期中考前複習卷的題（只從按鈕出，不排進每日計畫）；out＝停出表 kind:"out"（考不到，core isOut 讀它）；
   // challenge＝停出表 kind:"challenge"（只給 core weakTally 分類；出題規則不讀它，做過的照常在「練待加強的」出）
   function bank() {
-    var b = { cards: ALL_CARDS, active: {}, out: {}, challenge: {}, noDaily: {}, concepts: {}, figs: {} };
-    CARDS.forEach(function (c) { b.active[c.id] = 1; if (c.set === "mid") b.noDaily[c.id] = 1; });
+    var b = { cards: ALL_CARDS, active: {}, optional: {}, out: {}, challenge: {}, noDaily: {}, concepts: {}, figs: {} };
+    CARDS.forEach(function (c) { b.active[c.id] = 1; });
+    MID_CARDS.forEach(function (c) { b.optional[c.id] = 1; b.noDaily[c.id] = 1; });
     Object.keys(RETIRED).forEach(function (id) {
       var k = RETIRED[id] && RETIRED[id].kind;
       if (k === "out") b.out[id] = 1; else if (k === "challenge") b.challenge[id] = 1;
@@ -1005,7 +1009,7 @@
     return b;
   }
 
-  var api = { UNITS: UNITS, CONCEPTS: CONCEPTS, ALL_CARDS: ALL_CARDS, MERGED: MERGED, RETIRED: RETIRED, SOURCES: SOURCES, CARDS: CARDS, bank: bank };
+  var api = { UNITS: UNITS, CONCEPTS: CONCEPTS, ALL_CARDS: ALL_CARDS, MERGED: MERGED, RETIRED: RETIRED, SOURCES: SOURCES, CARDS: CARDS, MID_CARDS: MID_CARDS, bank: bank };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.G5SocBank = api;
 })(typeof window !== "undefined" ? window : this);
 
@@ -1090,6 +1094,8 @@
   function isActive(bank, id) { return !bank.active || !!bank.active[id] || !bank.cards.some(function (c) { return c.id === id; }); }
   // 考不到的題（bank.out＝範圍稽核 kind:"out"；2026-10-19 #2997 拍板、#3010）：不排新卡、不排到期複習、不進任何回合；目錄與作答紀錄照留（做過幾題不倒退）
   function isOut(bank, id) { return !!(bank.out && bank.out[id]); }
+  // 選練題（bank.optional，2026-11-01 安親班期中考前卷）：不是 active＝沒做過的不算進度分母、不排每日新卡；只有小考複習按鈕把它放進 ids 時可以出（allowedIn）。做過的照常算、照常到期複習
+  function isOptional(bank, id) { return !!(bank.optional && bank.optional[id]); }
   // 2026-11-01 律師：安親班期中考前複習卷（10/31）另開一顆按鈕抽考，「每日新題的數量不要變」。
   // bank.noDaily＝只從按鈕出、不排進每日計畫與補做的新卡（socbank.js bank() 把 set:"mid" 的題放進來）；
   // 仍是 active：單元、安親班卷、闖關照常出，做過的照常到期複習。沒有 noDaily 的題庫行為不變。
@@ -1261,7 +1267,7 @@
     var c = cardById(state, bank, id);
     if (!c || !conceptOn(state, bank, c.concept) || isOut(bank, id)) return false;
     var cs = cardState(state, id);
-    if (!cs.seen) return isActive(bank, id);
+    if (!cs.seen) return isActive(bank, id) || isOptional(bank, id);
     if (pick === "fresh" || touchedOn(state, day).indexOf(id) >= 0) return false;
     return pick === "again" || weakCard(cs);
   }

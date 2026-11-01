@@ -35,7 +35,7 @@ def open_page(browser, device=None, init=None):
 
 def current_card(page):
     q = page.locator("#main .q").inner_text()
-    return page.evaluate("(q)=>{var c=G5SocBank.CARDS.find(function(x){return x.q===q;});return c?{id:c.id,a:c.a,opts:c.opts,concept:c.concept}:null;}", q)
+    return page.evaluate("(q)=>{var c=G5SocBank.CARDS.concat(G5SocBank.MID_CARDS||[]).find(function(x){return x.q===q;});return c?{id:c.id,a:c.a,opts:c.opts,concept:c.concept}:null;}", q)
 
 
 def answer(page, right=True):
