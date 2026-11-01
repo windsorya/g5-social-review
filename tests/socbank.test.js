@@ -58,13 +58,13 @@ test("④題目、解說、錯誤選項解說、提示：每句 ≤40 字", () =
   assert.deepEqual(long, []);
 });
 
-test("⑤每個觀念都有題（8～15 題），總數約 100 題；每個觀念都有解說與先想想看", () => {
+test("⑤每個觀念都有題（8～40 題），總數約 216 題；每個觀念都有解說與先想想看", () => {   // 2026-11-01：上限 15→40、總數 90～110→200～230，原因：併入安親班期中考前複習卷（10/31）改寫題 108 題（m01～m108，每個觀念 6～26 題）
   const n = {}; CIDS.forEach((k) => { n[k] = 0; });
   B.CARDS.forEach((c) => { assert.ok(c.concept in n, c.id + " 的觀念不存在"); n[c.concept]++; });   // 2026-10-18：上限管的是實際出題量（被併的題不出題）
-  const off = CIDS.filter((k) => n[k] < 4 || n[k] > 15).map((k) => k + "=" + n[k]);
+  const off = CIDS.filter((k) => n[k] < 4 || n[k] > 40).map((k) => k + "=" + n[k]);   // 2026-11-01 上限 15→40（加安親班期中考前複習卷 108 題，最多的 1d 共 36 題）
   CIDS.forEach((k) => assert.ok(B.ALL_CARDS.filter((c) => c.concept === k).length >= 8, k + " 全部題少於 8"));
-  assert.deepEqual(off, [], "出題數不在 4～15：" + off.join("、"));
-  assert.ok(B.ALL_CARDS.length >= 90 && B.ALL_CARDS.length <= 110, "總題數 " + B.ALL_CARDS.length);
+  assert.deepEqual(off, [], "出題數不在 4～40：" + off.join("、"));
+  assert.ok(B.ALL_CARDS.length >= 200 && B.ALL_CARDS.length <= 230, "總題數 " + B.ALL_CARDS.length);   // 2026-11-01：90～110→200～230（原 108 題＋安親班期中考前複習卷 108 題＝216）
   CIDS.forEach((k) => { assert.ok(X.EXPLAIN[k] && X.EXPLAIN[k].length >= 2, k + " 缺解說"); const p = X.PREDICT[k]; assert.ok(p && p.a >= 0 && p.a < p.opts.length, k + " 缺先想想看"); });
 });
 
@@ -235,7 +235,7 @@ test("重複題合併表：被併的題存在、留下的題存在且沒被併�
   });
   assert.deepEqual(bad, []);
   assert.deepEqual(B.CARDS.map((c) => c.id), B.ALL_CARDS.filter((c) => !B.MERGED[c.id] && !(B.RETIRED || {})[c.id]).map((c) => c.id));
-  assert.equal(B.CARDS.length, 77);   // 2026-10-23：102 題－併題 10（c12、g02、c11、g01、e11 改回保留，#2709）－停出 21（f04 #3034 補停）＋1-1 補題 6（a12～a17）
+  assert.equal(B.CARDS.length, 185);   // 2026-11-01：77＋安親班期中考前複習卷改寫題 108（m01～m108，set:"mid"）＝185。原註： 2026-10-23：102 題－併題 10（c12、g02、c11、g01、e11 改回保留，#2709）－停出 21（f04 #3034 補停）＋1-1 補題 6（a12～a17）
   const n = {}; B.CARDS.forEach((c) => { n[c.concept] = (n[c.concept] || 0) + 1; });
   const thin = Object.keys(B.CONCEPTS).filter((k) => !(n[k] >= 4)).map((k) => k + "=" + (n[k] || 0));
   assert.deepEqual(thin, [], "每個觀念合併後至少 4 題");
@@ -414,4 +414,21 @@ test("範圍⑥照 app.html 組題庫跑核心：Codex 的重現（空白狀態 
   const q = (r.state && r.state.session && r.state.session.queue) || [];
   assert.ok(q.indexOf("f04") < 0, "f04 仍被排進佇列：" + JSON.stringify(q));
   assert.equal(r.error, "REVIEW_EMPTY", "只有 f04 時應該開不了局（全是考不到的題），實際：" + r.error);
+});
+
+// 2026-11-01 律師：安親班期中考前複習卷（10/31）另開按鈕抽考，「每日新題的數量不要變」
+test("期中考前複習卷：set:mid 的題進 active（按鈕出得到）、不排進每日計畫（bank().noDaily），每日計畫和沒有這些題時一樣", () => {
+  const b = B.bank(), mids = B.ALL_CARDS.filter((c) => c.set === "mid");
+  assert.equal(mids.length, 108);
+  assert.ok(mids.every((c) => b.active[c.id] && b.noDaily[c.id] && c.from === "改寫自安親班期中考前複習卷（10/31）"));
+  // 原本的題大多已練過（只剩 5 張沒練）：沒有 noDaily 時，配額＝max(5, 沒練過的÷剩下天數) 會被 108 張期中卷題撐大
+  const s0 = C.blankState();
+  B.CARDS.filter((c) => c.set !== "mid").slice(5).forEach((c) => { s0.cards[c.id] = { seen: 1, goodDays: ["2026-10-20"], blockedDay: null, due: "2026-11-20" }; });
+  const plan = (bank) => { const r = C.reduce(s0, { type: "tick", id: "t-mid" }, { bank, now: Date.parse("2026-11-02T12:00:00+08:00") }); return r.state.days["2026-11-02"].planIds; };
+  const noMid = Object.assign({}, b, { cards: B.ALL_CARDS.filter((c) => c.set !== "mid") });
+  assert.deepEqual(plan(b), plan(noMid), "加了期中卷題，每日計畫變了");
+  // 對照組（探針有牙）：拿掉 noDaily，期中卷題就會擠進每日計畫
+  assert.ok(plan(Object.assign({}, b, { noDaily: {} })).some((id) => /^m\d/.test(id)), "對照組沒有排到期中卷題，這條測不到東西");
+  const r = C.reduce(C.blankState(), { type: "sessionStart", id: "op-mid", kind: "review", pick: "fresh", ids: mids.map((c) => c.id), size: 20 }, { bank: b, now: Date.parse("2026-11-02T12:00:00+08:00") });
+  assert.equal(r.state.session.queue.length, 20, "期中卷按鈕開不了局：" + r.error);
 });

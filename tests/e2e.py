@@ -56,6 +56,9 @@ def flow_main(browser, label, device=None):
     n_c = pg.evaluate("Object.keys(G5SocBank.CONCEPTS).length")
     check(f"{label} {n_c} 個觀念入口", n_c == 8 and pg.locator("#concepts .ccard").count() == n_c, pg.locator("#concepts .ccard").count())
     check(f"{label} 小考複習列出第一、二單元", all(pg.locator(f'button[data-rv="u{u}"]').count() == 1 for u in ["s1", "s2"]))
+    # 2026-11-01 律師：安親班期中考前複習卷（10/31）獨立按鈕、放最前面、只出 set:"mid" 的題、每次隨機抽
+    rv0 = pg.locator("#main .review .rv").first
+    check(f"{label} 期中考前複習卷按鈕在清單最前面、寫「每次隨機抽題」", "安親班期中考前複習卷（10/31）" in rv0.inner_text() and "每次隨機抽題" in rv0.inner_text() and rv0.locator('button[data-rv="mid"]').count() == 1, rv0.inner_text()[:120])
     check(f"{label} 沒有水平捲動", no_overflow(pg))
     want = {"五上自然複習": "https://windsorya.github.io/g5-sci-review/", "五上數學複習": "https://windsorya.github.io/g5-math-review/",
             "難題解說": "https://windsorya.github.io/g5-help/", "五上國語複習": "https://windsorya.github.io/g5-chinese-review/",
@@ -615,6 +618,21 @@ def flow_review(browser):
     check("小考複習：第 2 單元只出地形、氣候的題", c and c["concept"] in ("2a", "2b", "2c", "2d"), c)
     check("小考複習沒有 JS 錯誤", not errors, errors)
     ctx.close()
+    # 2026-11-01 期中考前複習卷：按鈕只出 set:"mid" 的題；兩個全新存檔各按一次「練一段」，20 題的順序不同（隨機抽，不是每次同一批）
+    queues = []
+    for _ in range(2):
+        ctx, pg, errors = open_page(browser)
+        pg.locator('button[data-rv="mid"]').click(); pg.wait_for_selector("#main .q")
+        c = current_card(pg)
+        q = pg.evaluate("JSON.parse(localStorage.getItem('g5soc.v1')).session.queue")
+        mids = pg.evaluate("(ids)=>ids.every(function(id){var c=G5SocBank.ALL_CARDS.find(function(x){return x.id===id;});return c&&c.set==='mid';})", q)
+        check("期中考前複習卷：只出這份卷的題（20 題都是 set:mid）", bool(c) and len(q) == 20 and mids and c["id"] in q, {"card": c, "n": len(q)})
+        answer(pg, True)
+        check("期中考前複習卷：作答後出處列寫「改寫自安親班期中考前複習卷（10/31）」", "改寫自安親班期中考前複習卷（10/31）" in pg.inner_text("#main"), pg.inner_text("#main")[-200:])
+        check("期中考前複習卷沒有 JS 錯誤", not errors, errors)
+        queues.append(q)
+        ctx.close()
+    check("期中考前複習卷：兩次開局抽到的 20 題順序不同（隨機抽）", queues[0] != queues[1], queues)
 
 
 # 補題區（交辦 #1618）：家長打開才載入 g5-help/upload.js；本機測試用 g5-help 的原始碼頂替（還沒上線的版本也測得到），GAS 一律攔截不打真後端。

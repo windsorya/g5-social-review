@@ -402,7 +402,7 @@ function md(k){return k?(+k.slice(5,7))+"/"+(+k.slice(8,10)):"";}
 function card(id){return C.cardById(S(),BANK,id);}
 function redoIds(se){return se.wrong.filter(function(id){return C.servable(S(),BANK,id);});}   // #3010 F2：已停出／考不到的不重練，與核心開局同一判準（servable）   // 「再練答錯的」只算題庫裡還在的卡（題庫裁重複題後，答錯過的卡可能已被拿掉；Codex 審 g5-math-review 9af8526）
 function conceptOn(cid){return C.conceptOn(S(),BANK,cid);}
-function srcLine(c){var r=c.src&&MB.SOURCES[c.src];return '<div class="src">'+esc(c.page||SAMPLE)+(r?'・查證：<a href="'+esc(r.url)+'" target="_blank" rel="noopener">'+esc(r.name)+'</a>':'')+"</div>";}
+function srcLine(c){var r=c.src&&MB.SOURCES[c.src];return '<div class="src">'+esc(c.page||SAMPLE)+(c.from?'・'+esc(c.from):'')+(r?'・查證：<a href="'+esc(r.url)+'" target="_blank" rel="noopener">'+esc(r.name)+'</a>':'')+"</div>";}
 function on(sel,fn){var el=typeof sel==="string"?$(sel):sel;if(el)el.onclick=fn;}
 var actx=null;
 function chime(force){
@@ -559,6 +559,9 @@ function renderHome(){
 // 小考複習：把整個單元（或一個觀念）排成一輪；作答照規則記分、隔天照樣複習，不改今天的計畫
 function unitCards(unit){return C.poolCards(S(),BANK,V().today).filter(function(c){return CONCEPTS[c.concept].unit===unit&&conceptOn(c.concept);}).map(function(c){return c.id;});}
 function setCards(unit){return C.poolCards(S(),BANK,V().today).filter(function(c){return (c.set==="anqin"||ANQIN_ALSO[c.id])&&CONCEPTS[c.concept].unit===unit&&conceptOn(c.concept);}).map(function(c){return c.id;});}
+// 2026-11-01 律師：安親班期中考前複習卷（10/31）獨立一顆按鈕抽考，只出這份卷改寫的題（socbank.js set:"mid"）；這些題也照常算進各單元按鈕
+var MID_SET="mid", MID_NAME="安親班期中考前複習卷（10/31）";
+function midCards(unit){return C.poolCards(S(),BANK,V().today).filter(function(c){return c.set===MID_SET&&(!unit||CONCEPTS[c.concept].unit===unit)&&conceptOn(c.concept);}).map(function(c){return c.id;});}
 // 2026-10-11 律師：「每次複習都要從頭來一遍嗎？」「當天時間夠，想要全部做完，可以嗎？」
 // ⇒ 一段 20 題，做完可以馬上再練一段；也可以一次做完。
 // 2026-10-19 律師：「為何用單元方式測驗，每次都要重頭做，為何已做過的題目還要做？」「已經用其他方式做過的題目（比如闖關或每日模式），能否不用再重複做？」
@@ -567,10 +570,12 @@ var SEG=20;   // 一段 20 題：每題約 40–60 秒 [推估]，一段約 15�
 var lastReview=null;
 function reviewSets(){
   var out={};
+  if(midCards().length) out[MID_SET]={name:MID_NAME,note:'每次隨機抽題',ids:function(){return midCards();}};   // 清單最前面
   Object.keys(UNITS).forEach(function(u){
     var ids=unitCards(u); if(!ids.length) return;
-    var n=setCards(u).length;
-    out["u"+u]={name:'第 '+UNITS[u].replace(/^(\d+) /,"$1 單元 "),note:n?'含安親班卷 '+n+' 題':'',ids:function(){return unitCards(u);}};
+    var n=setCards(u).length, m=midCards(u).length, notes=[];
+    if(n) notes.push('含安親班卷 '+n+' 題'); if(m) notes.push('含期中考前複習卷 '+m+' 題');
+    out["u"+u]={name:'第 '+UNITS[u].replace(/^(\d+) /,"$1 單元 "),note:notes.join('、'),ids:function(){return unitCards(u);}};
   });
   Object.keys(UNITS).forEach(function(u){
     if(!setCards(u).length) return;
@@ -585,7 +590,9 @@ function statLine(st){return '練過 '+st.seen+'／'+st.total+' 題'+(st.seen&&s
 // 這一輪是哪一種記在回合本身（session.pick）：標籤、結束畫面都讀它，重新整理後也知道（Codex 審 b6c9b5e F4）
 function startReview(key,mode){
   var r=reviewSets()[key]; if(!r) return;
-  var a={type:"sessionStart",kind:"review",ids:r.ids()};
+  var ids=r.ids();
+  if(key===MID_SET){for(var i=ids.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),t=ids[i];ids[i]=ids[j];ids[j]=t;}}   // 2026-11-01 律師：期中考前複習卷要「抽考」，每次隨機抽（Fisher–Yates）；核心 reviewOrder／againOrder 同一層級照輸入順序，洗牌後抽出的就是隨機題
+  var a={type:"sessionStart",kind:"review",ids:ids};
   if(mode==="weak"||mode==="again") a.pick=mode;
   if(mode!=="all") a.size=SEG;
   beginRound(a,function(){lastReview=key;});   // 存檔成功才記住是哪個單元：存失敗時「繼續」的還是原本那一輪（Codex 審 b6c9b5e F4）
